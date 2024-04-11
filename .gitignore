@@ -1,0 +1,12 @@
+# IDEs
+.idea/
+.vscode/
+*.DotSettings.user
+
+# Build artifacts
+bin/
+obj/
+
+packaged/
+_old/
+*copy.sql
