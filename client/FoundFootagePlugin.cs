@@ -237,7 +237,7 @@ internal static class HttpUtils {
 //     ItemInstanceData instance = new ItemInstanceData(Guid.NewGuid());
 //     VideoInfoEntry entry = new VideoInfoEntry();
 //     entry.videoID = new VideoHandle(GuidUtils.MakeLocal(Guid.NewGuid()));
-//     entry.maxTime = 0;
+//     entry.maxTime = 1;
 //     entry.timeLeft = 0;
 //     entry.SetDirty();
 //     instance.AddDataEntry(entry);
@@ -285,7 +285,7 @@ internal static class VideoCameraPatch {
       FoundFootagePlugin.Logger.LogInfo($"Check FakeVideos");
       if(!FoundFootagePlugin.Instance.FakeVideos.Contains(entry.videoID)) return;
 
-      entry.maxTime = 0;
+      entry.maxTime = 1;
       entry.timeLeft = 0;
       entry.SetDirty();
 
@@ -593,7 +593,7 @@ internal static class RoundArtifactSpawnerPatch {
       ItemInstanceData instance = new ItemInstanceData(Guid.NewGuid());
       VideoInfoEntry entry = new VideoInfoEntry();
       entry.videoID = new VideoHandle(GuidUtils.MakeLocal(Guid.NewGuid()));
-      entry.maxTime = 0;
+      entry.maxTime = 1;
       entry.timeLeft = 0;
       entry.SetDirty();
       instance.AddDataEntry(entry);

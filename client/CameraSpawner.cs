@@ -40,7 +40,7 @@ public class CameraSpawner : MonoBehaviour {
         ItemInstanceData instance = new ItemInstanceData(Guid.NewGuid());
         VideoInfoEntry entry = new VideoInfoEntry();
         entry.videoID = new VideoHandle(GuidUtils.MakeLocal(Guid.NewGuid()));
-        entry.maxTime = 0;
+        entry.maxTime = 1;
         entry.timeLeft = 0;
         entry.SetDirty();
         instance.AddDataEntry(entry);
