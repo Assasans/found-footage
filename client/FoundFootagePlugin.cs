@@ -7,6 +7,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Reflection;
+using System.Reflection.Emit;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -254,15 +255,15 @@ internal static class HttpUtils {
 //   }
 // }
 
-internal static class GuidUtils {
-  internal static Guid MakeLocal(Guid guid) {
+public static class GuidUtils {
+  public static Guid MakeLocal(Guid guid) {
     var property = typeof(Guid).GetField("_a", BindingFlags.Instance | BindingFlags.NonPublic);
     object boxed = guid;
     property.SetValue(boxed, int.MaxValue);
     return (Guid)boxed;
   }
 
-  internal static bool IsLocal(Guid guid) {
+  public static bool IsLocal(Guid guid) {
     return (int)typeof(Guid)
       .GetField("_a", BindingFlags.Instance | BindingFlags.NonPublic)
       .GetValue(guid) == int.MaxValue;
@@ -271,6 +272,38 @@ internal static class GuidUtils {
 
 [HarmonyPatch(typeof(VideoCamera))]
 internal static class VideoCameraPatch {
+  [HarmonyTranspiler]
+  [HarmonyPatch("Update")]
+  public static IEnumerable<CodeInstruction> SuppressUpdateObjective(IEnumerable<CodeInstruction> instructions) {
+    bool found = false;
+    bool runAtNext = false;
+    foreach(var instruction in instructions) {
+      yield return instruction;
+
+      // IL_025f: isinst       FilmSomethingScaryObjective
+      if(instruction.Is(OpCodes.Isinst, typeof(FilmSomethingScaryObjective))) {
+        runAtNext = true;
+        continue;
+      }
+
+      // IL_0264: brfalse.s    IL_0275
+      if(runAtNext) {
+        found = true;
+        runAtNext = false;
+        yield return new CodeInstruction(OpCodes.Ldarg_0);
+        yield return CodeInstruction.LoadField(typeof(VideoCamera), "m_recorderInfoEntry");
+        yield return CodeInstruction.LoadField(typeof(VideoInfoEntry), "videoID");
+        yield return CodeInstruction.LoadField(typeof(VideoHandle), "id");
+        yield return CodeInstruction.Call(typeof(GuidUtils), nameof(GuidUtils.IsLocal), new[] { typeof(Guid) });
+        yield return new CodeInstruction(OpCodes.Brtrue_S, instruction.operand);
+      }
+    }
+
+    if(!found)
+      FoundFootagePlugin.Logger.LogError(
+        "Cannot find PhotonGameLobbyHandler.SetCurrentObjective in VideoCamera.Update");
+  }
+
   [HarmonyPostfix]
   [HarmonyPatch("ConfigItem")]
   public static void InitCamera(VideoCamera __instance, ItemInstanceData data, PhotonView? playerView) {
