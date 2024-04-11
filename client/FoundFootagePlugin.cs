@@ -15,16 +15,10 @@ using System.Threading.Tasks;
 using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.Logging;
-using DefaultNamespace;
 using HarmonyLib;
 using MyceliumNetworking;
 using Photon.Pun;
-using Photon.Realtime;
-using Unity.Collections;
 using UnityEngine;
-using Zorro.Core;
-using Zorro.Core.Serizalization;
-using Zorro.PhotonUtility;
 using Object = UnityEngine.Object;
 using Random = System.Random;
 
@@ -402,28 +396,12 @@ internal static class VideoCameraPatch {
       fileStream.Write(content.AsSpan());
     }
 
-    // RecordingsHandler.Instance.ExtractRecording()
     if(!recordings.ContainsKey(handle)) {
       FoundFootagePlugin.Logger.LogInfo("m_recordings.Add()");
       recordings.Add(handle, recording);
     }
 
-    // SendVideoToOthers(clip);
-
     FoundFootagePlugin.Logger.LogInfo("InitCamera shitted");
-  }
-
-  private static void SendVideoToOthers(Clip clip) {
-    FoundFootagePlugin.Logger.LogInfo("SendVideoToOthers entered");
-    var sender = new ClipSendUtils();
-    sender.OnCreated();
-    sender.InitSendVideoHandler();
-    sender.SendVideoThroughPhoton(clip, false);
-    FoundFootagePlugin.Logger.LogError($"Fake clip: {clip.clipID} has sent!");
-    CustomCommands<CustomCommandType>.SendPackage(new SendClipCompletedPackage {
-      ClipID = clip.clipID,
-      VideoHandle = clip.m_recording.videoHandle
-    }, ReceiverGroup.All);
   }
 }
 
@@ -446,110 +424,6 @@ public class VersionChecker {
     if(components[0].Trim() == actual) return true;
     if(components[1].Contains($"{actual}-compatible")) return true;
     return false;
-  }
-}
-
-internal class ClipSendUtils {
-  private readonly string VIDEO_EXTENSION = ".webm";
-  private const int BYTES_PER_CHUNK = 30000;
-  private string PATH_TO_VIDEO;
-  private bool m_UseSteamNetwork;
-  private SteamLobbyHandler m_SteamLobby;
-  private bool m_Sending;
-
-  public void OnCreated() {
-    PATH_TO_VIDEO = RecordingsHandler.GetDirectory();
-    InitSendVideoHandler();
-  }
-
-  public void InitSendVideoHandler() {
-    bool flag = Directory.Exists(PATH_TO_VIDEO);
-    FoundFootagePlugin.Logger.LogError("INIT PhotonSendVideoHandler with path: " + PATH_TO_VIDEO + " Exist? " + flag);
-    if(!flag)
-      Directory.CreateDirectory(PATH_TO_VIDEO);
-    m_SteamLobby = MainMenuHandler.SteamLobbyHandler;
-    if(m_SteamLobby != null)
-      m_UseSteamNetwork = m_SteamLobby.UseSteamNetwork;
-    else
-      m_UseSteamNetwork = false;
-  }
-
-  public void SendVideoThroughPhoton(Clip clipToSend, bool isReRequest) {
-    ContentBuffer contentBuffer;
-    if(!clipToSend.TryGetContentBuffer(out contentBuffer)) {
-      FoundFootagePlugin.Logger.LogError("FATAL! Clip: " + clipToSend.clipID.id +
-                                         " Does not have a content buffer! Cannot send video!");
-    } else {
-      VideoHandle videoHandle = clipToSend.m_recording.videoHandle;
-      FoundFootagePlugin.Logger.LogError("Sending Video Through Photon: CLIP: " + clipToSend.clipID.id + " VIDEO: " +
-                                         videoHandle);
-      m_Sending = true;
-      string path = Path.Combine(clipToSend.GetClipDirectory(), "output.webm");
-      byte[] sourceArray = File.ReadAllBytes(path);
-      FoundFootagePlugin.Logger.LogError("Found video: " + path + " Bytes: " + sourceArray.Length);
-      int length = BYTES_PER_CHUNK;
-      int sourceIndex = 0;
-      int num = 0;
-      List<byte[]> videoChunks = new List<byte[]>();
-      for(int index = 0; index < 10000; ++index) {
-        if(sourceIndex + length > sourceArray.Length) {
-          byte[] destinationArray = new byte[sourceArray.Length - sourceIndex];
-          Array.Copy(sourceArray, sourceIndex, destinationArray, 0, destinationArray.Length);
-          videoChunks.Add(destinationArray);
-          num += destinationArray.Length;
-          break;
-        }
-
-        byte[] destinationArray1 = new byte[length];
-        Array.Copy(sourceArray, sourceIndex, destinationArray1, 0, destinationArray1.Length);
-        videoChunks.Add(destinationArray1);
-        sourceIndex += destinationArray1.Length;
-        FoundFootagePlugin.Logger.LogError("Adding Chunk: New Pointer " + sourceIndex + " Wrote: " +
-                                           destinationArray1.Length + " Bytes!");
-        num += destinationArray1.Length;
-      }
-
-      FoundFootagePlugin.Logger.LogError("Chunks made: " + videoChunks.Count + " Bytes written: " + num);
-      SendVideoChunks(videoChunks, clipToSend.clipID, videoHandle, contentBuffer, isReRequest);
-    }
-  }
-
-  private void SendVideoChunks(List<byte[]> videoChunks, ClipID clipID, VideoHandle videoID,
-    ContentBuffer contentBuffer, bool isReRequest) {
-    FoundFootagePlugin.Logger.LogError("Begin To Send VideoChunks: " + videoChunks.Count + " Clip: " + clipID.id +
-                                       " Video: " + videoID);
-    ushort chunkIndex = 0;
-    foreach(byte[] videoChunk in videoChunks) {
-      SendVideoChunkPackage commandPackage = new SendVideoChunkPackage {
-        ChunkCount = (ushort)videoChunks.Count,
-        VideoChunkData = videoChunk,
-        ChunkIndex = chunkIndex,
-        VideoHandle = videoID,
-        ClipID = clipID
-      };
-      if(chunkIndex == 0) {
-        BinarySerializer serializer = new BinarySerializer(512, Allocator.Persistent);
-        contentBuffer.Serialize(serializer);
-        commandPackage.ContentEventData = serializer.buffer;
-      }
-
-      if(m_UseSteamNetwork && !isReRequest) {
-        NativeArray<byte> buffer = commandPackage.Serialize().buffer;
-        byte[] dst = new byte[buffer.Length];
-        ByteArrayConvertion.MoveToByteArray<byte>(ref buffer, ref dst);
-        buffer.Dispose();
-        m_SteamLobby.SendPackageToAll(dst);
-        FoundFootagePlugin.Logger.LogError("Sent chunk! " + (++chunkIndex));
-      } else if(CustomCommands<CustomCommandType>.SendPackage(commandPackage,
-                  ReceiverGroup.Others))
-        FoundFootagePlugin.Logger.LogError("Sent chunk! " + (++chunkIndex));
-      else
-        FoundFootagePlugin.Logger.LogError("Failed To Send chunk!");
-
-      Thread.Sleep(500);
-    }
-
-    m_Sending = false;
   }
 }
 
@@ -637,34 +511,7 @@ internal static class RoundArtifactSpawnerPatch {
       FoundFootagePlugin.Logger.LogInfo($"[RoundArtifactSpawnerPatch] Spawned found camera at {pos}!");
     }
   }
-
-  [HarmonyPostfix]
-  [HarmonyPatch("Start")]
-  internal static void CreateArtifactSpawners(RoundArtifactSpawner __instance) {
-    // Debug.LogError("CreateArtifactSpawners shitted");
-    // for (int index = 0; index < 100; ++index)
-    // {
-    //   Debug.LogError($"CreateArtifactSpawners shit {index}");
-    //   GameObject spawner = Object.Instantiate(__instance.artifactSpawnerPrefab, RoundArtifactSpawner.GetRandPointWithWeight(), Quaternion.identity);
-    //   spawner.AddComponent<CameraSpawner>();
-    //   Object.DestroyImmediate(spawner.GetComponent<ArtifactSpawner>());
-    //   CameraSpawner component = spawner.GetComponent<CameraSpawner>();
-    //   component.transform.parent = __instance.transform;
-    //   component.gameObject.SetActive(true);
-    // }
-  }
 }
-
-// [HarmonyPatch(typeof(ArtifactSpawner))]
-// internal static class ArtifactSpawnerPatch {
-//   [HarmonyPostfix]
-//   [HarmonyPatch("Update")]
-//   internal static void Update(RoundArtifactSpawner __instance, ref float ___maxWaitForRest, ref int ___maxNrOfThrows) {
-//     Debug.LogError("ArtifactSpawner.Update shitted");
-//     ___maxWaitForRest = 0;
-//     ___maxNrOfThrows = 1000;
-//   }
-// }
 
 [HarmonyPatch(typeof(PhotonGameLobbyHandler))]
 internal static class PhotonGameLobbyHandlerPatch {
@@ -682,20 +529,6 @@ internal static class PhotonGameLobbyHandlerPatch {
 
       __instance.StartCoroutine(WaitThen(5f, () => {
         var recordings = RecordingsHandler.GetRecordings();
-        // var camerasCurrentRecording = RecordingsHandler.GetCamerasCurrentRecording();
-        //
-        // foreach(var guid in camerasCurrentRecording.GetKeys()) {
-        //   Debug.LogError($"Camera recording: {guid}");
-        //   if(CameraHandler.TryGetCamera(guid, out VideoCamera camera)) {
-        //     Debug.LogError($"Stop recording for recording camera {guid}");
-        //     camera.StopRecording();
-        //   }
-        //   if(ItemInstanceDataHandler.TryGetInstanceData(guid, out ItemInstanceData data)) {
-        //     Debug.LogError($"Stop recording for recording handler {guid}");
-        //     RecordingsHandler.StopRecording(data);
-        //   }
-        // }
-
         foreach(var (videoID, recording) in recordings) {
           Debug.LogError($"Check {videoID}");
           if(GuidUtils.IsLocal(videoID.id)) continue;
