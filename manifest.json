@@ -1,9 +1,10 @@
 {
   "name": "FoundFootage",
-  "version_number": "0.2.0",
+  "version_number": "0.2.1",
   "website_url": "https://github.com/Assasans/found-footage",
   "description": "Mod that adds real lost footage from other players to your Old World.",
   "dependencies": [
+    "BepInEx-BepInExPack-5.4.2100",
     "RugbugRedfern-MyceliumNetworking-1.0.10"
   ]
 }

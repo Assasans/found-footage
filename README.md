@@ -10,7 +10,7 @@ You must have the mod installed to **interact** with lost cameras and view recor
 
 ## IMPORTANT INFORMATION
 
-This mod sends your in-game camera footage to the server __along with audio__, depending on the mod's configuration.  
+This mod sends your in-game camera footage to the server __along with audio__, depending on the mod's configuration. **Anyone can watch your videos later.**  
 You can request your data or have it removed, see configuration file for more information.
 
 ## Gameplay
@@ -19,4 +19,12 @@ You can find lost cameras in the Old World. These contain footage of other playe
 You put them into an extraction machine like a normal camera.  
 Note that these recordings **will not give you any views or money**.
 
+## Known bugs
+
 The mod is experimental, bugs may occur, please report them to a [GitHub repository](https://github.com/Assasans/found-footage/issues) if you can.
+When submitting a bug report, please attach your BepInEx log (located at `BepInEx/LogOutput.log`).
+
+- Playback stops randomly and no buttons appear
+  * No known fix for the problem, please submit a bug report.
+- "Failed to extract" with found cameras
+  * Most likely one of your team members does not have a mod installed. The game does the extraction on each client separately, and clients without the mod have no found recording data. If you are sure that everyone has the mod installed and working, please submit a bug report.
