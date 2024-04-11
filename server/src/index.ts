@@ -23,9 +23,27 @@ interface VideoResponse {
   timestamp: string;
 }
 
+function normalizePathname(pathname: string) {
+  // Remove trailing slash
+  if(pathname.charAt(pathname.length - 1) === '/') {
+    pathname = pathname.slice(0, -1);
+  }
+
+  // Remove consecutive slashes
+  pathname = pathname.replace(/\/\/+/g, '/');
+
+  // Ensure leading slash
+  if(pathname.charAt(0) !== '/') {
+    pathname = '/' + pathname;
+  }
+
+  return pathname;
+}
+
 export default {
   async fetch(request: Request, env: Env) {
-    const { pathname, searchParams } = new URL(request.url);
+    let { pathname, searchParams } = new URL(request.url);
+    pathname = normalizePathname(pathname);
 
     if(request.method === 'GET' && pathname === '/version') {
       return new Response(env.CLIENT_VERSION);
