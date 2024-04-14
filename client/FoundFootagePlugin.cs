@@ -8,7 +8,6 @@ using System.Net;
 using System.Net.Http;
 using System.Reflection;
 using System.Reflection.Emit;
-using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -74,6 +73,7 @@ public class FoundFootagePlugin : BaseUnityPlugin {
     Logger.LogInfo($"Plugin {PluginInfo.PLUGIN_GUID} is loaded!");
     Harmony.CreateAndPatchAll(Assembly.GetExecutingAssembly(), PluginInfo.PLUGIN_GUID);
     Logger.LogInfo($"Plugin {PluginInfo.PLUGIN_GUID} patched!");
+    Logger.LogInfo($"Server URL: {Instance.ServerUrl?.Value}");
 
     try {
       MyceliumNetwork.RegisterNetworkObject(this, ModId);
@@ -85,14 +85,18 @@ public class FoundFootagePlugin : BaseUnityPlugin {
       WarningShown.Value = true;
       Config.Save();
 
-      MessageBoxUtils.Show(
-        "Content Warning - Found Footage",
-        "READ THIS IMPORTANT INFORMATION!\n\n" +
-        "This mod sends your in-game camera footage to the server along with audio, depending on the mod's configuration. " +
-        "You can request your data or have it removed, see configuration file for more information.\n\n" +
-        "This message will only be shown once.",
-        0x00000030
-      );
+      Task.Run(() => {
+        // Give game time to create window
+        Thread.Sleep(1000);
+        MessageBoxUtils.Show(
+          "Content Warning - Found Footage",
+          "READ THIS IMPORTANT INFORMATION!\n\n" +
+          "This mod sends your in-game camera footage to the server along with audio, depending on the mod's configuration. ANYONE CAN WATCH YOUR VIDEOS LATER!\n" +
+          "You can request your data or have it removed, see configuration file for more information.\n\n" +
+          "This message will only be shown once.",
+          0x00000030
+        );
+      });
     }
 
     Task.Run(async () => {
@@ -104,9 +108,11 @@ public class FoundFootagePlugin : BaseUnityPlugin {
           Logger.LogInfo($"Local version {local} is compatible with remote {remote}");
         } else {
           Logger.LogError($"Local version {local} is NOT compatible with remote {remote}");
-          MessageBoxUtils.Show("Content Warning - Found Footage",
+          MessageBoxUtils.Show(
+            "Content Warning - Found Footage",
             $"Incompatible mod version! Local: {local}, remote: {remote}\nYou can play the game, but beware of undefined behaviour. If possible, please update the mod.",
-            0x00000010);
+            0x00000010
+          );
         }
       } catch(Exception exception) {
         Logger.LogError(exception);
@@ -135,15 +141,6 @@ public class FoundFootagePlugin : BaseUnityPlugin {
       stream.Write(content);
       Logger.LogError($"Wrote {content.Length} bytes");
     }
-  }
-}
-
-internal static class MessageBoxUtils {
-  [DllImport("user32.dll", CharSet = CharSet.Auto)]
-  private static extern int MessageBox(IntPtr hWnd, string text, string caption, uint type);
-
-  internal static void Show(string title, string content, uint type) {
-    MessageBox(IntPtr.Zero, content, title, type);
   }
 }
 
@@ -426,7 +423,7 @@ public class VersionChecker {
       response.EnsureSuccessStatusCode();
       return await response.Content.ReadAsStringAsync();
     } catch(HttpRequestException exception) {
-      Console.WriteLine($"An error occurred while fetching version: {exception.Message}");
+      Console.WriteLine($"An error occurred while fetching version: {exception}");
       return "0.0.0 (incompatible)";
     }
   }
