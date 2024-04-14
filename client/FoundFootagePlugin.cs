@@ -334,14 +334,26 @@ internal static class VideoCameraPatch {
         FoundFootagePlugin.Logger.LogError("MyceliumNetwork.RPC start");
         foreach(var chunk in EnumerableExtensions.SplitArray(content, 1024 * 128)) {
           FoundFootagePlugin.Logger.LogError($"Send chunk {chunk.Length} bytes");
-          MyceliumNetwork.RPC(FoundFootagePlugin.ModId, nameof(FoundFootagePlugin.CreateFakeVideo),
+          MyceliumNetwork.RPC(
+            FoundFootagePlugin.ModId,
+            nameof(FoundFootagePlugin.CreateFakeVideo),
             ReliableType.Reliable,
-            entry.videoID.id.ToString(), chunk, false);
+            entry.videoID.id.ToString(),
+            chunk,
+            false
+          );
+          Thread.Sleep(100);
         }
 
         FoundFootagePlugin.Logger.LogError("Send final");
-        MyceliumNetwork.RPC(FoundFootagePlugin.ModId, nameof(FoundFootagePlugin.CreateFakeVideo), ReliableType.Reliable,
-          entry.videoID.id.ToString(), Array.Empty<byte>(), true);
+        MyceliumNetwork.RPC(
+          FoundFootagePlugin.ModId,
+          nameof(FoundFootagePlugin.CreateFakeVideo),
+          ReliableType.Reliable,
+          entry.videoID.id.ToString(),
+          Array.Empty<byte>(),
+          true
+        );
       }).Start();
 
       // FoundFootagePlugin.Logger.LogError("CreateFakeVideo start");

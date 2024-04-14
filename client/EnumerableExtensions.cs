@@ -4,22 +4,22 @@ using System.Collections.Generic;
 namespace FoundFootage;
 
 public static class EnumerableExtensions {
-  public static IEnumerable<T[]> SplitArray<T>(IEnumerable<T> source, int size) {
-    if(null == source) throw new ArgumentNullException(nameof(source));
-    if(size <= 0) throw new ArgumentOutOfRangeException(nameof(size));
+  public static IEnumerable<byte[]> SplitArray(byte[] source, int chunkSize) {
+    if(source == null) throw new ArgumentNullException(nameof(source));
+    if(chunkSize <= 0) throw new ArgumentOutOfRangeException(nameof(chunkSize));
 
-    List<T> list = new List<T>(size);
-    foreach(T item in source) {
-      list.Add(item);
-
-      if(list.Count >= size) {
-        yield return list.ToArray();
-
-        list.Clear();
+    int currentIndex = 0;
+    while(true) {
+      if(currentIndex + chunkSize < source.Length) {
+        // Extract the next chunk from the data
+        yield return source[currentIndex..(currentIndex + chunkSize)];
+      } else {
+        // Extract the remaining data
+        yield return source[currentIndex..];
+        break;
       }
-    }
 
-    // Do we have last incomplete chunk?
-    if(list.Count > 0) yield return list.ToArray();
+      currentIndex += chunkSize;
+    }
   }
 }
