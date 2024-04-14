@@ -125,21 +125,21 @@ public class FoundFootagePlugin : BaseUnityPlugin {
 
   [CustomRPC]
   public void CreateFakeVideo(string guidString, byte[] content, bool final) {
-    Logger.LogError("CreateFakeVideo!");
+    Logger.LogInfo("CreateFakeVideo!");
     VideoHandle handle = new VideoHandle(Guid.Parse(guidString));
-    Logger.LogError("CreateFakeVideo!!");
+    Logger.LogInfo("CreateFakeVideo!!");
 
     if(!parts.TryGetValue(handle, out MemoryStream? stream)) {
       parts[handle] = stream = new MemoryStream();
     }
 
     if(final) {
-      Logger.LogError($"Final!!!");
+      Logger.LogInfo("Final!!!");
       VideoCameraPatch.CreateFakeVideo(handle, stream.ToArray());
-      Logger.LogError("CreateFakeVideo!!!");
+      Logger.LogInfo("CreateFakeVideo!!!");
     } else {
       stream.Write(content);
-      Logger.LogError($"Wrote {content.Length} bytes");
+      Logger.LogInfo($"Wrote {content.Length} bytes");
     }
   }
 }
@@ -171,9 +171,9 @@ internal static class HttpUtils {
       using Stream responseStream = response.GetResponseStream();
       using StreamReader reader = new StreamReader(responseStream);
       string responseText = reader.ReadToEnd();
-      Console.WriteLine(responseText);
-    } catch(WebException ex) {
-      Console.WriteLine("Error: " + ex.Message);
+      FoundFootagePlugin.Logger.LogInfo(responseText);
+    } catch(WebException exception) {
+      FoundFootagePlugin.Logger.LogError($"Error: {exception}");
     }
   }
 
@@ -241,7 +241,7 @@ internal static class HttpUtils {
 //
 //     if(CameraHandler.TryGetCamera(instance.m_guid, out VideoCamera camera)) {
 //     } else {
-//       Debug.LogError("No VideoCamera found");
+//       FoundFootagePlugin.Logger.LogError("No VideoCamera found");
 //     }
 //   }
 // }
@@ -298,15 +298,15 @@ internal static class VideoCameraPatch {
   [HarmonyPostfix]
   [HarmonyPatch("ConfigItem")]
   public static void InitCamera(VideoCamera __instance, ItemInstanceData data, PhotonView? playerView) {
-    FoundFootagePlugin.Logger.LogInfo($"InitCamera shitting from player");
+    FoundFootagePlugin.Logger.LogInfo("InitCamera shitting from player");
     if(data.TryGetEntry(out VideoInfoEntry entry)) {
       FoundFootagePlugin.Logger.LogInfo($"Handling {entry.videoID}");
 
       if(entry.videoID.id == VideoHandle.Invalid.id) return;
-      FoundFootagePlugin.Logger.LogInfo($"Check IsLocal");
+      FoundFootagePlugin.Logger.LogInfo("Check IsLocal");
       if(!GuidUtils.IsLocal(entry.videoID.id)) return;
 
-      FoundFootagePlugin.Logger.LogInfo($"Check FakeVideos");
+      FoundFootagePlugin.Logger.LogInfo("Check FakeVideos");
       if(!FoundFootagePlugin.Instance.FakeVideos.Contains(entry.videoID)) return;
 
       entry.maxTime = 1;
@@ -318,19 +318,19 @@ internal static class VideoCameraPatch {
         .GetValue(__instance);
       screen.enabled = false;
 
-      FoundFootagePlugin.Logger.LogInfo($"Check playerView");
+      FoundFootagePlugin.Logger.LogInfo("Check playerView");
       if(playerView == null) return;
 
-      FoundFootagePlugin.Logger.LogInfo($"Check ProcessedFakeVideos");
+      FoundFootagePlugin.Logger.LogInfo("Check ProcessedFakeVideos");
       if(FoundFootagePlugin.Instance.ProcessedFakeVideos.Contains(entry.videoID)) return;
       FoundFootagePlugin.Instance.ProcessedFakeVideos.Add(entry.videoID);
 
-      FoundFootagePlugin.Logger.LogError("CreateFakeVideo start");
+      FoundFootagePlugin.Logger.LogInfo("CreateFakeVideo start");
       new Thread(() => {
         byte[] content = DownloadFakeVideo().GetAwaiter().GetResult();
-        FoundFootagePlugin.Logger.LogError("MyceliumNetwork.RPC start");
+        FoundFootagePlugin.Logger.LogInfo("MyceliumNetwork.RPC start");
         foreach(var chunk in EnumerableExtensions.SplitArray(content, 1024 * 128)) {
-          FoundFootagePlugin.Logger.LogError($"Send chunk {chunk.Length} bytes");
+          FoundFootagePlugin.Logger.LogInfo($"Send chunk {chunk.Length} bytes");
           MyceliumNetwork.RPC(
             FoundFootagePlugin.ModId,
             nameof(FoundFootagePlugin.CreateFakeVideo),
@@ -342,7 +342,7 @@ internal static class VideoCameraPatch {
           Thread.Sleep(100);
         }
 
-        FoundFootagePlugin.Logger.LogError("Send final");
+        FoundFootagePlugin.Logger.LogInfo("Send final");
         MyceliumNetwork.RPC(
           FoundFootagePlugin.ModId,
           nameof(FoundFootagePlugin.CreateFakeVideo),
@@ -353,11 +353,11 @@ internal static class VideoCameraPatch {
         );
       }).Start();
 
-      // FoundFootagePlugin.Logger.LogError("CreateFakeVideo start");
+      // FoundFootagePlugin.Logger.LogInfo("CreateFakeVideo start");
       // CreateFakeVideo(entry.videoID, content);
-      // FoundFootagePlugin.Logger.LogError("CreateFakeVideo end");
+      // FoundFootagePlugin.Logger.LogInfo("CreateFakeVideo end");
     } else {
-      Debug.LogError("No VideoInfoEntry found");
+      FoundFootagePlugin.Logger.LogError("No VideoInfoEntry found");
       throw new Exception();
     }
   }
@@ -371,10 +371,10 @@ internal static class VideoCameraPatch {
 
       using var stream = new MemoryStream();
       await response.Content.CopyToAsync(stream);
-      Console.WriteLine("File downloaded successfully.");
+      FoundFootagePlugin.Logger.LogInfo("File downloaded successfully.");
       return stream.ToArray();
-    } catch(HttpRequestException ex) {
-      Console.WriteLine($"An error occurred while downloading the file: {ex.Message}");
+    } catch(HttpRequestException exception) {
+      FoundFootagePlugin.Logger.LogError($"An error occurred while downloading the file: {exception}");
       throw;
     }
   }
@@ -390,7 +390,7 @@ internal static class VideoCameraPatch {
       (CameraRecording)typeof(RecordingsHandler).GetMethod("CreateNewRecording",
           BindingFlags.Instance | BindingFlags.NonPublic)!
         .Invoke(RecordingsHandler.Instance, new object[] { handle });
-    Debug.LogError($"recording: {recording}");
+    FoundFootagePlugin.Logger.LogInfo($"recording: {recording}");
     var clip = new Clip(new ClipID(new Guid()), true, PhotonNetwork.LocalPlayer.ActorNumber, recording);
     clip.isRecording = false;
     clip.encoded = true;
@@ -418,12 +418,12 @@ public class VersionChecker {
   public async Task<string> GetVersion() {
     using var httpClient = new HttpClient();
     try {
-      using var response = await httpClient.GetAsync($"{FoundFootagePlugin.Instance.ServerUrl.Value}/version",
+      using var response = await httpClient.GetAsync($"{FoundFootagePlugin.Instance.ServerUrl.Value}/version?local={PluginInfo.PLUGIN_VERSION}",
         HttpCompletionOption.ResponseHeadersRead);
       response.EnsureSuccessStatusCode();
       return await response.Content.ReadAsStringAsync();
     } catch(HttpRequestException exception) {
-      Console.WriteLine($"An error occurred while fetching version: {exception}");
+      FoundFootagePlugin.Logger.LogError($"An error occurred while fetching version: {exception}");
       return "0.0.0 (incompatible)";
     }
   }
@@ -458,7 +458,7 @@ internal static class VerboseDebugPatch {
   [HarmonyPostfix]
   [HarmonyPatch("Log")]
   internal static void Log(string message) {
-    Debug.LogError(message);
+    Debug.Log(message);
   }
 
   [HarmonyPostfix]
@@ -473,18 +473,18 @@ internal static class ExtractVideoMachinePatch {
   [HarmonyPostfix]
   [HarmonyPatch("RPC_Success")]
   internal static void RPC_Success() {
-    Debug.LogError("RPC_Success shitted");
+    FoundFootagePlugin.Logger.LogInfo("RPC_Success shitted");
     if(!PhotonNetwork.IsMasterClient) return;
 
     var recordings = RecordingsHandler.GetRecordings();
     foreach(var (videoID, recording) in recordings) {
-      Debug.LogError($"Check {videoID}");
+      FoundFootagePlugin.Logger.LogInfo($"Check {videoID}");
       if(GuidUtils.IsLocal(videoID.id)) continue;
 
       if(FoundFootagePlugin.Instance.Random.NextDouble() <= FoundFootagePlugin.Instance.PassUploadChance.Value) {
         PhotonGameLobbyHandlerPatch.UploadRecording(videoID, recording, "extract");
       } else {
-        Debug.LogError($"Do not extracting");
+        FoundFootagePlugin.Logger.LogInfo("Do not extracting");
       }
     }
   }
@@ -495,10 +495,10 @@ internal static class RoundArtifactSpawnerPatch {
   [HarmonyPostfix]
   [HarmonyPatch("Start")]
   internal static void Awake(ArtifactSpawner __instance) {
-    Debug.LogError("Start shitted");
+    FoundFootagePlugin.Logger.LogInfo("Start shitted");
 
     if(!PhotonNetwork.IsMasterClient) {
-      Debug.LogError("Not a master client");
+      FoundFootagePlugin.Logger.LogWarning("Not a master client");
       return;
     }
 
@@ -532,24 +532,24 @@ internal static class PhotonGameLobbyHandlerPatch {
   [HarmonyPostfix]
   [HarmonyPatch("ReturnToSurface")]
   internal static void ReturnToSurface(PhotonGameLobbyHandler __instance) {
-    Debug.LogError("ReturnToSurface enter");
+    FoundFootagePlugin.Logger.LogInfo("ReturnToSurface enter");
     if(Object.FindObjectsOfType<Player>().Where(pl => !pl.ai).All(player => player.data.dead)) {
-      Debug.LogError("CheckForAllDead true");
+      FoundFootagePlugin.Logger.LogInfo("CheckForAllDead true");
 
       __instance.StartCoroutine(WaitThen(5f, () => {
         var recordings = RecordingsHandler.GetRecordings();
         foreach(var (videoID, recording) in recordings) {
-          Debug.LogError($"Check {videoID}");
+          FoundFootagePlugin.Logger.LogInfo($"Check {videoID}");
           if(GuidUtils.IsLocal(videoID.id)) continue;
 
           if(FoundFootagePlugin.Instance.Random.NextDouble() <= FoundFootagePlugin.Instance.DeathUploadChance.Value) {
             UploadRecording(videoID, recording, "death");
           } else {
-            Debug.LogError($"Do not extracting");
+            FoundFootagePlugin.Logger.LogInfo("Do not extracting");
           }
         }
 
-        Debug.LogError("CheckForAllDead shitted");
+        FoundFootagePlugin.Logger.LogInfo("CheckForAllDead shitted");
       }));
     }
   }
@@ -563,12 +563,12 @@ internal static class PhotonGameLobbyHandlerPatch {
           if(success) break;
 
           Thread.Sleep(5000);
-          FoundFootagePlugin.Logger.LogError($"Failed to extract {videoID}, retrying...");
+          FoundFootagePlugin.Logger.LogWarning($"Failed to extract {videoID}, retrying...");
         }
 
         if(success) {
           var path = Path.Combine(recording.GetDirectory(), "fullRecording.webm");
-          FoundFootagePlugin.Logger.LogError($"Extracted {videoID}: {path}");
+          FoundFootagePlugin.Logger.LogInfo($"Extracted {videoID}: {path}");
           HttpUtils.UploadFile($"{FoundFootagePlugin.Instance.ServerUrl.Value}/videos", path,
             new Dictionary<string, string> {
               ["video_id"] = recording.videoHandle.id.ToString(),
@@ -576,7 +576,7 @@ internal static class PhotonGameLobbyHandlerPatch {
               ["language"] = CultureInfo.InstalledUICulture.TwoLetterISOLanguageName,
               ["reason"] = reason
             });
-          FoundFootagePlugin.Logger.LogError($"Uploaded video!");
+          FoundFootagePlugin.Logger.LogInfo("Uploaded video!");
         } else {
           FoundFootagePlugin.Logger.LogError($"Failed to extract {videoID}");
         }
