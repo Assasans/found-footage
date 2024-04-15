@@ -6,7 +6,7 @@ compatibility_flags = ["nodejs_compat"]
 [vars]
 SOURCES_URL = ""
 CONTACT_EMAIL = ""
-CLIENT_VERSION = "0.2.1 (0.2.0-compatible; 0.1.0-compatible)"
+CLIENT_VERSION = "0.2.2 (0.2.1-compatible; 0.2.0-compatible; 0.1.0-compatible)"
 # LOKI = { URL = "", AUTH = "" }
 
 [[d1_databases]]
