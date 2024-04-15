@@ -50,7 +50,7 @@ public class FoundFootagePlugin : BaseUnityPlugin {
     FakeVideos = new List<VideoHandle>();
     ProcessedFakeVideos = new List<VideoHandle>();
 
-    ServerUrl = Config.Bind("Internal", "ServerUrl", "https://foundfootage-server.assasans.workers.dev",
+    ServerUrl = Config.Bind("Internal", "ServerUrl", "https://foundfootage-server.assasans.dev",
       "Base URL of the server hosting the videos.\n### DATA REQUEST OR REMOVAL ###\nIf you want to request your data or have it removed:\nsend an email to the address available on the \"/info\" endpoint (e.g. https://server.local/info).\nNote that your email must include your User ID (see below).");
     UserId = Config.Bind("Internal", "UserId", "",
       "Random identifier associated with uploaded recordings. Can be used to remove your data.");
