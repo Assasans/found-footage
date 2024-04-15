@@ -122,6 +122,11 @@ export default {
       });
 
       if(request.method === 'GET' && pathname === '/version') {
+        log('TRACE', {
+          action: 'get version',
+          ray: ray,
+          local: searchParams.get('local')
+        });
         return respond(ray, new Response(env.CLIENT_VERSION));
       }
 
