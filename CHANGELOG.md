@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.2
+
+- client: Share video URL instead of contents (fixed video freezing)
+- client: Change default server URL
+- client: Improve logging
+- client: Make message box modal
+
 ## v0.2.1
 
 - client: Prevent found cameras from affecting objective

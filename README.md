@@ -25,6 +25,8 @@ The mod is experimental, bugs may occur, please report them to a [GitHub reposit
 When submitting a bug report, please attach your BepInEx log (located at `BepInEx/LogOutput.log`).
 
 - Playback stops randomly and no buttons appear
-  * No known fix for the problem, please submit a bug report.
+  * Should be fixed in v0.2.2, please submit a bug report if not.
 - "Failed to extract" with found cameras
-  * Most likely one of your team members does not have a mod installed. The game does the extraction on each client separately, and clients without the mod have no found recording data. If you are sure that everyone has the mod installed and working, please submit a bug report.
+  * Try to change server URL to `https://foundfootage-server.assasans.dev`
+  * Most likely one of your team members does not have a mod installed. The game does the extraction on each client separately, and clients without the mod have no found recording data.
+  * If you are sure that everyone has the mod installed and working, please submit a bug report.
