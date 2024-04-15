@@ -1,3 +1,10 @@
+import { AwsClient } from 'aws4fetch';
+
+const r2 = new AwsClient({
+  accessKeyId: '1d87156207184c11fd2b7ac589c70643',
+  secretAccessKey: '039ab2c94988bb0e3759a5b858761aad2026250e7959a39808db38446030359a'
+});
+
 export interface Env {
   SOURCES_URL: string;
   CONTACT_EMAIL: string;
@@ -266,6 +273,62 @@ export default {
         return respond(ray, new Response(object.body, {
           headers
         }));
+      }
+
+      if(request.method === 'GET' && pathname === '/video/signed') {
+        let { seq }: SeqResponse = (await env.DB.prepare('SELECT seq FROM sqlite_sequence WHERE name = "videos"').first())!;
+
+        const id = Math.floor(Math.random() * seq) + 1;
+        const reason = Math.random() < 0.75 ? 'death' : 'extract';
+
+        let result: VideoResponse | null = await env.DB.prepare('SELECT * FROM videos WHERE id >= ? AND available = 1 AND reason = ? LIMIT 1')
+          .bind(id, reason)
+          .first();
+
+        // No with set reason?
+        if(!result) {
+          result = await env.DB.prepare('SELECT * FROM videos WHERE id >= ? AND available = 1 LIMIT 1')
+            .bind(id)
+            .first();
+        }
+
+        if(!result) {
+          // Nothing we can do
+          return respond(ray, new Response(`No videos, please report this as a bug. id >= ${id}, seq = ${seq}, reason = ${reason}`));
+        }
+
+        const object = await env.STORAGE.get(result.object);
+        if(object === null) {
+          log('ERROR', {
+            action: 'object not found',
+            ray,
+            object: result.object,
+            video: result
+          });
+          return respond(ray, new Response('Object Not Found', { status: 404 }));
+        }
+
+        const bucketName = 'prod-foundfootage';
+        const accountId = '1e6ab2b283478194e3297fac143759e9';
+    
+        // const url = new URL('https://1e6ab2b283478194e3297fac143759e9.r2.cloudflarestorage.com');
+        const url = new URL(`https://${bucketName}.${accountId}.r2.cloudflarestorage.com`);
+    
+        url.pathname = result.object;
+        // Specify a custom expiry for the presigned URL, in seconds
+        url.searchParams.set('X-Amz-Expires', '3600');
+    
+        const signed = await r2.sign(
+          new Request(url, {
+            method: 'GET',
+          }),
+          {
+            aws: { signQuery: true },
+          }
+        );
+    
+        // Caller can now use this URL to upload to that object.
+        return respond(ray, new Response(signed.url, { status: 200 }));
       }
 
       log('INFO', {
