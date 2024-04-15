@@ -121,26 +121,18 @@ public class FoundFootagePlugin : BaseUnityPlugin {
     });
   }
 
-  private Dictionary<VideoHandle, MemoryStream> parts = new();
-
   [CustomRPC]
-  public void CreateFakeVideo(string guidString, byte[] content, bool final) {
+  public void CreateFakeVideo(string guidString, string signedUrl) {
     Logger.LogInfo("CreateFakeVideo!");
     VideoHandle handle = new VideoHandle(Guid.Parse(guidString));
-    Logger.LogInfo("CreateFakeVideo!!");
 
-    if(!parts.TryGetValue(handle, out MemoryStream? stream)) {
-      parts[handle] = stream = new MemoryStream();
-    }
+    new Thread(() => {
+      Logger.LogInfo($"Downloading video {guidString} -> {signedUrl}");
+      byte[] content = VideoCameraPatch.DownloadFakeVideo(signedUrl).GetAwaiter().GetResult();
 
-    if(final) {
-      Logger.LogInfo("Final!!!");
-      VideoCameraPatch.CreateFakeVideo(handle, stream.ToArray());
-      Logger.LogInfo("CreateFakeVideo!!!");
-    } else {
-      stream.Write(content);
-      Logger.LogInfo($"Wrote {content.Length} bytes");
-    }
+      Logger.LogInfo($"VideoCameraPatch.CreateFakeVideo");
+      VideoCameraPatch.CreateFakeVideo(handle, content);
+    }).Start();
   }
 }
 
@@ -207,44 +199,44 @@ internal static class HttpUtils {
   }
 }
 
-// [HarmonyPatch(typeof(SurfaceNetworkHandler))]
-// internal static class SurfaceNetworkHandlerPatch {
-//   [HarmonyPrefix]
-//   [HarmonyPatch("ReturningFromLostWorld", MethodType.Getter)]
-//   internal static bool ReturningFromLostWorld(ref bool __result) {
-//     // FoundFootagePlugin.Logger.LogError("ReturningFromLostWorld!");
-//     __result = true;
-//     return false;
-//   }
-//
-//   [HarmonyPostfix]
-//   [HarmonyPatch("InitSurface")]
-//   internal static void SpawnOnStartRun() {
-//     SpawnExtraCamera();
-//   }
-//
-//   private static void SpawnExtraCamera() {
-//     FoundFootagePlugin.Logger.LogInfo("Spawning extra camera!");
-//
-//     ItemInstanceData instance = new ItemInstanceData(Guid.NewGuid());
-//     VideoInfoEntry entry = new VideoInfoEntry();
-//     entry.videoID = new VideoHandle(GuidUtils.MakeLocal(Guid.NewGuid()));
-//     entry.maxTime = 1;
-//     entry.timeLeft = 0;
-//     entry.SetDirty();
-//     instance.AddDataEntry(entry);
-//     FoundFootagePlugin.Instance.FakeVideos.Add(entry.videoID);
-//     FoundFootagePlugin.Logger.LogInfo($"added entry {entry.videoID.id}");
-//     Pickup pickup = PickupHandler.CreatePickup(1, instance, new Vector3(-14.842f, 2.418f, 8.776f),
-//       Quaternion.Euler(0f, -67.18f, 0f));
-//     FoundFootagePlugin.Logger.LogInfo("Spawned extra camera!");
-//
-//     if(CameraHandler.TryGetCamera(instance.m_guid, out VideoCamera camera)) {
-//     } else {
-//       FoundFootagePlugin.Logger.LogError("No VideoCamera found");
-//     }
-//   }
-// }
+[HarmonyPatch(typeof(SurfaceNetworkHandler))]
+internal static class SurfaceNetworkHandlerPatch {
+  [HarmonyPrefix]
+  [HarmonyPatch("ReturningFromLostWorld", MethodType.Getter)]
+  internal static bool ReturningFromLostWorld(ref bool __result) {
+    // FoundFootagePlugin.Logger.LogError("ReturningFromLostWorld!");
+    __result = true;
+    return false;
+  }
+
+  [HarmonyPostfix]
+  [HarmonyPatch("InitSurface")]
+  internal static void SpawnOnStartRun() {
+    SpawnExtraCamera();
+  }
+
+  private static void SpawnExtraCamera() {
+    FoundFootagePlugin.Logger.LogInfo("Spawning extra camera!");
+
+    ItemInstanceData instance = new ItemInstanceData(Guid.NewGuid());
+    VideoInfoEntry entry = new VideoInfoEntry();
+    entry.videoID = new VideoHandle(GuidUtils.MakeLocal(Guid.NewGuid()));
+    entry.maxTime = 1;
+    entry.timeLeft = 0;
+    entry.SetDirty();
+    instance.AddDataEntry(entry);
+    FoundFootagePlugin.Instance.FakeVideos.Add(entry.videoID);
+    FoundFootagePlugin.Logger.LogInfo($"added entry {entry.videoID.id}");
+    Pickup pickup = PickupHandler.CreatePickup(1, instance, new Vector3(-14.842f, 2.418f, 8.776f),
+      Quaternion.Euler(0f, -67.18f, 0f));
+    FoundFootagePlugin.Logger.LogInfo("Spawned extra camera!");
+
+    if(CameraHandler.TryGetCamera(instance.m_guid, out VideoCamera camera)) {
+    } else {
+      FoundFootagePlugin.Logger.LogError("No VideoCamera found");
+    }
+  }
+}
 
 public static class GuidUtils {
   public static Guid MakeLocal(Guid guid) {
@@ -327,29 +319,14 @@ internal static class VideoCameraPatch {
 
       FoundFootagePlugin.Logger.LogInfo("CreateFakeVideo start");
       new Thread(() => {
-        byte[] content = DownloadFakeVideo().GetAwaiter().GetResult();
-        FoundFootagePlugin.Logger.LogInfo("MyceliumNetwork.RPC start");
-        foreach(var chunk in EnumerableExtensions.SplitArray(content, 1024 * 128)) {
-          FoundFootagePlugin.Logger.LogInfo($"Send chunk {chunk.Length} bytes");
-          MyceliumNetwork.RPC(
-            FoundFootagePlugin.ModId,
-            nameof(FoundFootagePlugin.CreateFakeVideo),
-            ReliableType.Reliable,
-            entry.videoID.id.ToString(),
-            chunk,
-            false
-          );
-          Thread.Sleep(100);
-        }
-
-        FoundFootagePlugin.Logger.LogInfo("Send final");
+        string signedUrl = DownloadFakeVideoSignedUrl().GetAwaiter().GetResult();
+        FoundFootagePlugin.Logger.LogInfo("Sending signed URL over Mycelium...");
         MyceliumNetwork.RPC(
           FoundFootagePlugin.ModId,
           nameof(FoundFootagePlugin.CreateFakeVideo),
           ReliableType.Reliable,
           entry.videoID.id.ToString(),
-          Array.Empty<byte>(),
-          true
+          signedUrl
         );
       }).Start();
 
@@ -362,11 +339,27 @@ internal static class VideoCameraPatch {
     }
   }
 
-  public static async Task<byte[]> DownloadFakeVideo() {
+  public static async Task<string> DownloadFakeVideoSignedUrl() {
     using var httpClient = new HttpClient();
     try {
-      using var response = await httpClient.GetAsync($"{FoundFootagePlugin.Instance.ServerUrl.Value}/video",
-        HttpCompletionOption.ResponseHeadersRead);
+      using var response = await httpClient.GetAsync(
+        $"{FoundFootagePlugin.Instance.ServerUrl.Value}/video/signed",
+        HttpCompletionOption.ResponseHeadersRead
+      );
+      response.EnsureSuccessStatusCode();
+      var signedUrl = await response.Content.ReadAsStringAsync();
+      FoundFootagePlugin.Logger.LogInfo($"Signed URL got successfully: {signedUrl}");
+      return signedUrl;
+    } catch(HttpRequestException exception) {
+      FoundFootagePlugin.Logger.LogError($"An error occurred while getting signed URL: {exception}");
+      throw;
+    }
+  }
+
+  public static async Task<byte[]> DownloadFakeVideo(string signedUrl) {
+    using var httpClient = new HttpClient();
+    try {
+      using var response = await httpClient.GetAsync(signedUrl, HttpCompletionOption.ResponseHeadersRead);
       response.EnsureSuccessStatusCode();
 
       using var stream = new MemoryStream();
@@ -418,7 +411,8 @@ public class VersionChecker {
   public async Task<string> GetVersion() {
     using var httpClient = new HttpClient();
     try {
-      using var response = await httpClient.GetAsync($"{FoundFootagePlugin.Instance.ServerUrl.Value}/version?local={PluginInfo.PLUGIN_VERSION}",
+      using var response = await httpClient.GetAsync(
+        $"{FoundFootagePlugin.Instance.ServerUrl.Value}/version?local={PluginInfo.PLUGIN_VERSION}",
         HttpCompletionOption.ResponseHeadersRead);
       response.EnsureSuccessStatusCode();
       return await response.Content.ReadAsStringAsync();
