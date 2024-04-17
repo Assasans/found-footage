@@ -7,6 +7,7 @@ compatibility_flags = ["nodejs_compat"]
 SOURCES_URL = ""
 CONTACT_EMAIL = ""
 CLIENT_VERSION = "0.2.2 (0.2.1-compatible; 0.2.0-compatible; 0.1.0-compatible)"
+R2_SIGNING = { ACCESS_KEY_ID = "", SECRET_ACCESS_KEY = "", CLOUDFLARE_ACCOUNT = "", BUCKET = "" }
 # LOKI = { URL = "", AUTH = "" }
 
 [[d1_databases]]

@@ -1,14 +1,10 @@
 import { AwsClient } from 'aws4fetch';
 
-const r2 = new AwsClient({
-  accessKeyId: '1d87156207184c11fd2b7ac589c70643',
-  secretAccessKey: '039ab2c94988bb0e3759a5b858761aad2026250e7959a39808db38446030359a'
-});
-
 export interface Env {
   SOURCES_URL: string;
   CONTACT_EMAIL: string;
   CLIENT_VERSION: string;
+  R2_SIGNING: { ACCESS_KEY_ID: string, SECRET_ACCESS_KEY: string, CLOUDFLARE_ACCOUNT: string, BUCKET: string };
   LOKI: { URL: string, AUTH: string } | undefined;
 
   DB: D1Database;
@@ -313,11 +309,12 @@ export default {
           return respond(ray, new Response('Object Not Found', { status: 404 }));
         }
 
-        const bucketName = 'prod-foundfootage';
-        const accountId = '1e6ab2b283478194e3297fac143759e9';
+        const r2 = new AwsClient({
+          accessKeyId: env.R2_SIGNING.ACCESS_KEY_ID,
+          secretAccessKey: env.R2_SIGNING.SECRET_ACCESS_KEY
+        });
     
-        // const url = new URL('https://1e6ab2b283478194e3297fac143759e9.r2.cloudflarestorage.com');
-        const url = new URL(`https://${bucketName}.${accountId}.r2.cloudflarestorage.com`);
+        const url = new URL(`https://${env.R2_SIGNING.BUCKET}.${env.R2_SIGNING.CLOUDFLARE_ACCOUNT}.r2.cloudflarestorage.com`);
     
         url.pathname = result.object;
         // Specify a custom expiry for the presigned URL, in seconds
