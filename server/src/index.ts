@@ -340,6 +340,67 @@ export default {
         }));
       }
 
+      if(request.method === 'POST' && pathname === '/video/vote') {
+        try {
+          const formData = await request.formData();
+          const videoId = formData.get('video_id') as string | null;
+          const userId = formData.get('user_id') as string | null;
+          const lobbyId = formData.get('lobby_id') as string | null;
+          const voteType = formData.get('vote_type') as string | null;
+
+          console.log({ videoId, userId, lobbyId, voteType });
+
+          let response;
+          try {
+            console.log(`Adding vote to database...`);
+            log('DEBUG', {
+              action: 'adding vote to database',
+              ray: ray,
+              video_id: videoId,
+              user_id: userId,
+              lobby_id: lobbyId,
+              vote_type: voteType,
+              ip
+            });
+
+            response = await env.DB.prepare('INSERT INTO votes (video_id, user_id, lobby_id, vote_type, flags, ip, timestamp) VALUES (?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP)')
+              .bind(videoId, userId, lobbyId, voteType, ip)
+              .run();
+          } catch(error) {
+            console.error('Database error', error);
+            // TypeScript 😊
+            if(
+              error &&
+              typeof error === 'object' &&
+              'message' in error &&
+              typeof error.message === 'string'
+            ) {
+              if(error.message.includes('UNIQUE constraint failed: videos.video_id')) {
+                log('INFO', {
+                  action: 'duplicate vote',
+                  ray: ray,
+                  video_id: videoId,
+                  user_id: userId
+                });
+                return respond(ray, new Response(`Duplicate vote ${videoId} & ${userId}`, { status: 400 }));
+              }
+            }
+            throw error;
+          }
+
+          return respond(ray, Response.json(response));
+        } catch(error) {
+          console.error('Error:', error);
+          log('ERROR', {
+            action: 'add vote error',
+            ray: ray,
+            error: error instanceof Error ? error.toString() : error
+          });
+
+          return respond(ray, new Response('An error occurred during processing', { status: 500 }));
+        }
+      }
+
       log('INFO', {
         action: 'route not found',
         ray: ray,
