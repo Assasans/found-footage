@@ -266,7 +266,19 @@ export default {
             object: result.object,
             video: result
           });
-          return respond(ray, new Response('Object Not Found', { status: 404 }));
+
+          // Dangling database entry
+          const response = await env.DB.prepare('UPDATE videos SET available = 0 WHERE id = ?')
+            .bind(id)
+            .run();
+          log('INFO', {
+            action: 'hide dangling video',
+            ray,
+            video: result,
+            response: response
+          });
+
+          return respond(ray, Response.redirect('/video?dangling=1', 302));
         }
 
         const headers = new Headers();
@@ -308,7 +320,19 @@ export default {
             object: result.object,
             video: result
           });
-          return respond(ray, new Response('Object Not Found', { status: 404 }));
+
+          // Dangling database entry
+          const response = await env.DB.prepare('UPDATE videos SET available = 0 WHERE id = ?')
+            .bind(id)
+            .run();
+          log('INFO', {
+            action: 'hide dangling video',
+            ray,
+            video: result,
+            response: response
+          });
+
+          return respond(ray, Response.redirect('/video/signed?dangling=1', 302));
         }
 
         const r2 = new AwsClient({
