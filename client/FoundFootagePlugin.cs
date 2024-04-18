@@ -579,6 +579,7 @@ internal static class PhotonGameLobbyHandlerPatch {
             new Dictionary<string, string> {
               ["video_id"] = recording.videoHandle.id.ToString(),
               ["user_id"] = FoundFootagePlugin.Instance.UserId.Value,
+              ["lobby_id"] = PhotonNetwork.CurrentRoom.Name,
               ["language"] = CultureInfo.InstalledUICulture.TwoLetterISOLanguageName,
               ["reason"] = reason
             });
