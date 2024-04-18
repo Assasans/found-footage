@@ -315,13 +315,13 @@ export default {
           accessKeyId: env.R2_SIGNING.ACCESS_KEY_ID,
           secretAccessKey: env.R2_SIGNING.SECRET_ACCESS_KEY
         });
-    
+
         const url = new URL(`https://${env.R2_SIGNING.BUCKET}.${env.R2_SIGNING.CLOUDFLARE_ACCOUNT}.r2.cloudflarestorage.com`);
-    
+
         url.pathname = result.object;
         // Specify a custom expiry for the presigned URL, in seconds
         url.searchParams.set('X-Amz-Expires', '3600');
-    
+
         const signed = await r2.sign(
           new Request(url, {
             method: 'GET',
@@ -330,9 +330,14 @@ export default {
             aws: { signQuery: true },
           }
         );
-    
+
         // Caller can now use this URL to upload to that object.
-        return respond(ray, new Response(signed.url, { status: 200 }));
+        return respond(ray, new Response(signed.url, {
+          status: 200,
+          headers: {
+            'X-Video-Id': result.video_id
+          }
+        }));
       }
 
       log('INFO', {
