@@ -8,11 +8,13 @@ CREATE TABLE IF NOT EXISTS videos (
   object TEXT UNIQUE,
   available BOOLEAN,
   ip VARCHAR(45) NULL,
-  timestamp TIMESTAMP NULL
+  timestamp TIMESTAMP NULL,
+  lobby_id UUID NULL
 );
 
 CREATE UNIQUE INDEX idx_videos_video ON videos (video_id);
 CREATE INDEX idx_videos_user ON videos (user_id);
+CREATE INDEX idx_videos_lobby ON videos (lobby_id);
 CREATE INDEX idx_videos_language ON videos (language);
 CREATE INDEX idx_videos_reason ON videos (reason);
 CREATE INDEX idx_videos_available ON videos (available);

@@ -138,6 +138,7 @@ export default {
           const formData = await request.formData();
           const videoId = formData.get('video_id') as string | null;
           const userId = formData.get('user_id') as string | null;
+          const lobbyId = formData.get('lobby_id') as string | null;
           const language = formData.get('language') as string | null;
           const reason = formData.get('reason') as string | null;
           const file = formData.get('file') as File | null;
@@ -171,7 +172,7 @@ export default {
           }
 
           const objectKey = `${userId}_${videoId}_${language}_${reason}.webm`;
-          console.log({ objectKey, videoId, userId, language, reason, ip });
+          console.log({ objectKey, videoId, userId, lobbyId, language, reason, ip });
 
           let response;
           try {
@@ -182,13 +183,14 @@ export default {
               object: objectKey,
               video_id: videoId,
               user_id: userId,
+              lobby_id: lobbyId,
               language,
               reason,
               ip
             });
 
-            response = await env.DB.prepare('INSERT INTO videos (video_id, user_id, language, reason, object, available, ip, timestamp) VALUES (?, ?, ?, ?, ?, true, ?, CURRENT_TIMESTAMP)')
-              .bind(videoId, userId, language, reason, objectKey, ip)
+            response = await env.DB.prepare('INSERT INTO videos (video_id, user_id, language, reason, object, available, ip, timestamp, lobby_id) VALUES (?, ?, ?, ?, ?, true, ?, CURRENT_TIMESTAMP, ?)')
+              .bind(videoId, userId, language, reason, objectKey, ip, lobbyId)
               .run();
           } catch(error) {
             console.error('Database error', error);
