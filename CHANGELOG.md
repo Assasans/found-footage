@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.0
+
+- **Voting system**
+- client: Send lobby ID along with video
+- client: Try to update server URL on error
+
 ## v0.2.2
 
 - client: Share video URL instead of contents (fixed video freezing)

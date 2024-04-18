@@ -19,10 +19,16 @@ You can find lost cameras in the Old World. These contain footage of other playe
 You put them into an extraction machine like a normal camera.  
 Note that these recordings **will not give you any views or money**.
 
+### Voting
+
+Since v0.3.0 you can like or dislike other people's videos. Video's score will be used for pruning system to remove bad videos (as of 18.04.2024, there are already 25k videos that occupy 125 GB).  
+If the video is too short **and not funny**, or if it is not in-game footage, go ahead and click Dislike.  
+Vote wisely, **you will not be able to change your vote** even in a different lobby.
+
 ## Known bugs
 
 The mod is experimental, bugs may occur, please report them to a [GitHub repository](https://github.com/Assasans/found-footage/issues) if you can.
-When submitting a bug report, please attach your BepInEx log (located at `BepInEx/LogOutput.log`).
+When submitting a bug report, **please attach your BepInEx log (located at `BepInEx/LogOutput.log`)**.
 
 - Playback stops randomly and no buttons appear
   * Should be fixed in v0.2.2, please submit a bug report if not.
