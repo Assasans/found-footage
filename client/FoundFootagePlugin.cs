@@ -17,7 +17,10 @@ using BepInEx.Logging;
 using HarmonyLib;
 using MyceliumNetworking;
 using Photon.Pun;
+using TMPro;
 using UnityEngine;
+using UnityEngine.Localization.PropertyVariants;
+using UnityEngine.UI;
 using Object = UnityEngine.Object;
 using Random = System.Random;
 
@@ -33,10 +36,13 @@ public class FoundFootagePlugin : BaseUnityPlugin {
   internal Random Random { get; private set; }
   internal List<VideoHandle> FakeVideos { get; private set; }
   internal List<VideoHandle> ProcessedFakeVideos { get; private set; }
+  internal Dictionary<VideoHandle, string> ClientToServerId { get; private set; }
 
   internal ConfigEntry<string>? ServerUrl { get; private set; }
   internal ConfigEntry<string>? UserId { get; private set; }
   internal ConfigEntry<bool>? WarningShown { get; private set; }
+
+  internal ConfigEntry<bool>? VotingEnabled { get; private set; }
 
   internal ConfigEntry<float>? SpawnChance { get; private set; }
   internal ConfigEntry<float>? DeathUploadChance { get; private set; }
@@ -49,6 +55,7 @@ public class FoundFootagePlugin : BaseUnityPlugin {
     Random = new Random();
     FakeVideos = new List<VideoHandle>();
     ProcessedFakeVideos = new List<VideoHandle>();
+    ClientToServerId = new Dictionary<VideoHandle, string>();
 
     ServerUrl = Config.Bind("Internal", "ServerUrl", "https://foundfootage-server.assasans.dev",
       "Base URL of the server hosting the videos.\n### DATA REQUEST OR REMOVAL ###\nIf you want to request your data or have it removed:\nsend an email to the address available on the \"/info\" endpoint (e.g. https://server.local/info).\nNote that your email must include your User ID (see below).");
@@ -61,6 +68,8 @@ public class FoundFootagePlugin : BaseUnityPlugin {
     }
 
     WarningShown = Config.Bind("Internal", "WarningShown", false, "");
+
+    VotingEnabled = Config.Bind("Voting", "VotingEnabled", true, "Enable voting after watching another team's video.");
 
     SpawnChance = Config.Bind("Chances", "SpawnChance", 0.3f,
       "Chance that another team's camera will be spawned (0 to disable).");
@@ -132,9 +141,13 @@ public class FoundFootagePlugin : BaseUnityPlugin {
   }
 
   [CustomRPC]
-  public void CreateFakeVideo(string guidString, string signedUrl) {
+  public void CreateFakeVideo(string guidString, string signedUrl, string? serverVideoId = null) {
     Logger.LogInfo("CreateFakeVideo!");
     VideoHandle handle = new VideoHandle(Guid.Parse(guidString));
+
+    if(serverVideoId != null) {
+      ClientToServerId.Add(handle, serverVideoId);
+    }
 
     new Thread(() => {
       Logger.LogInfo($"Downloading video {guidString} -> {signedUrl}");
@@ -146,8 +159,8 @@ public class FoundFootagePlugin : BaseUnityPlugin {
   }
 }
 
-internal static class HttpUtils {
-  internal static void UploadFile(string url, string filePath, Dictionary<String, String> properties) {
+public static class HttpUtils {
+  public static void UploadFile(string url, string filePath, Dictionary<String, String> properties) {
     string boundary = "---------------------------" + DateTime.Now.Ticks.ToString("x");
     HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
     request.Method = "PUT";
@@ -179,12 +192,12 @@ internal static class HttpUtils {
     }
   }
 
-  private static void WriteBoundary(Stream requestStream, string boundary) {
+  public static void WriteBoundary(Stream requestStream, string boundary) {
     byte[] boundaryBytes = Encoding.ASCII.GetBytes("\r\n--" + boundary + "\r\n");
     requestStream.Write(boundaryBytes, 0, boundaryBytes.Length);
   }
 
-  private static void WriteFormValue(Stream requestStream, string fieldName, string value, string boundary) {
+  public static void WriteFormValue(Stream requestStream, string fieldName, string value, string boundary) {
     string formItemTemplate = "Content-Disposition: form-data; name=\"{0}\"\r\n\r\n{1}";
     string formItem = string.Format(formItemTemplate, fieldName, value);
     byte[] formItemBytes = Encoding.UTF8.GetBytes(formItem);
@@ -192,7 +205,7 @@ internal static class HttpUtils {
     WriteBoundary(requestStream, boundary);
   }
 
-  private static void WriteFile(Stream requestStream, string filePath, string boundary) {
+  public static void WriteFile(Stream requestStream, string filePath, string boundary) {
     using(FileStream fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read)) {
       string headerTemplate =
         "Content-Disposition: form-data; name=\"file\"; filename=\"{0}\"\r\nContent-Type: application/octet-stream\r\n\r\n";
@@ -329,14 +342,15 @@ internal static class VideoCameraPatch {
 
       FoundFootagePlugin.Logger.LogInfo("CreateFakeVideo start");
       new Thread(() => {
-        string signedUrl = DownloadFakeVideoSignedUrl().GetAwaiter().GetResult();
+        (string signedUrl, string? serverVideoId) = DownloadFakeVideoSignedUrl().GetAwaiter().GetResult();
         FoundFootagePlugin.Logger.LogInfo("Sending signed URL over Mycelium...");
         MyceliumNetwork.RPC(
           FoundFootagePlugin.ModId,
           nameof(FoundFootagePlugin.CreateFakeVideo),
           ReliableType.Reliable,
           entry.videoID.id.ToString(),
-          signedUrl
+          signedUrl,
+          serverVideoId
         );
       }).Start();
 
@@ -349,7 +363,7 @@ internal static class VideoCameraPatch {
     }
   }
 
-  public static async Task<string> DownloadFakeVideoSignedUrl() {
+  public static async Task<(string, string?)> DownloadFakeVideoSignedUrl() {
     using var httpClient = new HttpClient();
     try {
       using var response = await httpClient.GetAsync(
@@ -358,8 +372,14 @@ internal static class VideoCameraPatch {
       );
       response.EnsureSuccessStatusCode();
       var signedUrl = await response.Content.ReadAsStringAsync();
-      FoundFootagePlugin.Logger.LogInfo($"Signed URL got successfully: {signedUrl}");
-      return signedUrl;
+
+      string? videoId = null;
+      if(response.Headers.TryGetValues("X-Video-Id", out var values)) {
+        videoId = values.Single();
+      }
+
+      FoundFootagePlugin.Logger.LogInfo($"Signed URL got successfully (video ID: {videoId}): {signedUrl}");
+      return (signedUrl, videoId);
     } catch(HttpRequestException exception) {
       FoundFootagePlugin.Logger.LogError($"An error occurred while getting signed URL: {exception}");
       throw;
@@ -530,7 +550,7 @@ internal static class RoundArtifactSpawnerPatch {
 
 [HarmonyPatch(typeof(PhotonGameLobbyHandler))]
 internal static class PhotonGameLobbyHandlerPatch {
-  private static IEnumerator WaitThen(float t, Action a) {
+  public static IEnumerator WaitThen(float t, Action a) {
     yield return new WaitForSecondsRealtime(t);
     a();
   }
@@ -592,4 +612,152 @@ internal static class PhotonGameLobbyHandlerPatch {
       }
     }).Start();
   }
+}
+
+[HarmonyPatch(typeof(UploadVideoStation))]
+internal static class UploadVideoStationPatch {
+  public static GameObject? LikeUi;
+  public static GameObject? DislikeUi;
+  public static GameObject? LikeInteractable;
+  public static GameObject? DislikeInteractable;
+
+  [HarmonyPostfix]
+  [HarmonyPatch("Awake")]
+  public static void Awake(UploadVideoStation __instance) {
+    if(!FoundFootagePlugin.Instance.VotingEnabled.Value) {
+      FoundFootagePlugin.Logger.LogInfo("Voting is disabled, not patching UploadVideoStation.Awake");
+      return;
+    }
+
+    FoundFootagePlugin.Logger.LogError($"Root: {__instance.gameObject}");
+
+    var videoDone = __instance.m_uploadCompleteUI.gameObject.transform.Find("VIDEO/VideoDone").gameObject;
+    var saveVideo = videoDone.transform.Find("SaveVideo").gameObject;
+    FoundFootagePlugin.Logger.LogError($"SaveVideo: {saveVideo}");
+
+    var interactableRoot = __instance.gameObject.transform.Find("SaveVideoToDesktopInteractable").gameObject;
+    foreach(var collider in interactableRoot.GetComponentsInChildren<BoxCollider>()) {
+      collider.size = Vector3.zero;
+    }
+
+    var replayInteractable = interactableRoot.transform.Find("ReplayInt").gameObject;
+    FoundFootagePlugin.Logger.LogError($"ReplayInt: {replayInteractable}");
+
+    // Unity is fucked up
+    __instance.StartCoroutine(PhotonGameLobbyHandlerPatch.WaitThen(5f, () => {
+      Sprite? likeSprite = null;
+      Sprite? dislikeSprite = null;
+
+      var objects = Resources.FindObjectsOfTypeAll<Object>();
+      foreach(var it in objects) {
+        if(it is Sprite sprite) {
+          if(it.name == "Emoji-Great--Streamline-Ultimate") {
+            FoundFootagePlugin.Logger.LogInfo($"Found like sprite: {sprite}");
+            likeSprite = sprite;
+          }
+
+          if(it.name == "Skull-1--Streamline-Ultimate (1)") {
+            FoundFootagePlugin.Logger.LogInfo($"Found dislike sprite: {sprite}");
+            dislikeSprite = sprite;
+          }
+        }
+      }
+
+      var like = Object.Instantiate(saveVideo, videoDone.transform);
+      like.name = "Like";
+      like.transform.localPosition = new Vector3(-178.82f, -178.82f, 0);
+      Object.Destroy(like.GetComponentInChildren<GameObjectLocalizer>());
+      like.GetComponentInChildren<TextMeshProUGUI>().SetText("LIKE");
+      like.GetComponentInChildren<Image>().sprite = likeSprite;
+      LikeUi = like;
+
+      var dislike = Object.Instantiate(saveVideo, videoDone.transform);
+      dislike.name = "Dislike";
+      dislike.transform.localPosition = new Vector3(0, -178.82f, 0);
+      Object.Destroy(dislike.GetComponentInChildren<GameObjectLocalizer>());
+      dislike.GetComponentInChildren<TextMeshProUGUI>().SetText("DISLIKE");
+      dislike.GetComponentInChildren<Image>().sprite = dislikeSprite;
+      DislikeUi = dislike;
+
+      var likeInteractable = Object.Instantiate(replayInteractable, interactableRoot.transform);
+      likeInteractable.name = "LikeInt";
+      likeInteractable.transform.localPosition = new Vector3(0, -0.5772f, 0);
+      Object.Destroy(likeInteractable.GetComponent<ReplayVideoInteractable>());
+      likeInteractable.AddComponent<LikeInteractable>();
+      LikeInteractable = likeInteractable;
+
+      var dislikeInteractable = Object.Instantiate(replayInteractable, interactableRoot.transform);
+      dislikeInteractable.name = "DisikeInt";
+      dislikeInteractable.transform.localPosition = new Vector3(1.0727f, -0.5772f, 0);
+      Object.Destroy(dislikeInteractable.GetComponent<ReplayVideoInteractable>());
+      dislikeInteractable.AddComponent<DislikeInteractable>();
+      DislikeInteractable = dislikeInteractable;
+    }));
+  }
+}
+
+[HarmonyPatch(typeof(UploadCompleteUI))]
+internal static class UploadCompleteUIPatch {
+  [HarmonyPostfix]
+  [HarmonyPatch("PlayVideo")]
+  public static void PlayVideo(UploadCompleteUI __instance, IPlayableVideo playableVideo) {
+    if(!FoundFootagePlugin.Instance.VotingEnabled.Value) {
+      FoundFootagePlugin.Logger.LogInfo("Voting is disabled, not patching UploadCompleteUI.PlayVideo");
+      return;
+    }
+
+    if(playableVideo is CameraRecording recording) {
+      FoundFootagePlugin.Logger.LogInfo("UploadCompleteUI.PlayVideo is CameraRecording");
+
+      bool isLocal = GuidUtils.IsLocal(recording.videoHandle.id);
+      UploadVideoStationPatch.LikeUi.SetActive(isLocal);
+      UploadVideoStationPatch.DislikeUi.SetActive(isLocal);
+      UploadVideoStationPatch.LikeInteractable.SetActive(isLocal);
+      UploadVideoStationPatch.DislikeInteractable.SetActive(isLocal);
+
+      if(isLocal) {
+        var root = __instance.gameObject.transform.parent.parent.parent;
+        var interactableRoot = root.Find("SaveVideoToDesktopInteractable").gameObject;
+        interactableRoot.GetComponentInChildren<LikeInteractable>().SetRecording(recording);
+        interactableRoot.GetComponentInChildren<DislikeInteractable>().SetRecording(recording);
+        FoundFootagePlugin.Logger.LogInfo("UploadCompleteUI.PlayVideo completed");
+      }
+    } else {
+      FoundFootagePlugin.Logger.LogWarning("UploadCompleteUI.PlayVideo not CameraRecording");
+    }
+  }
+
+  // What the fuck
+  // [HarmonyTranspiler]
+  // [HarmonyPatch("DisplayVideoEval", MethodType.Enumerator)]
+  // public static IEnumerable<CodeInstruction> DisplayVideoEval() {
+  //   var enumeratorType = typeof(UploadCompleteUI).Assembly.GetTypes()
+  //     .Single(type => type.Name.Contains("<DisplayVideoEval>"));
+  //
+  //   return new CodeMatcher()
+  //     .MatchForward(false,
+  //       new CodeMatch(OpCodes.Callvirt,
+  //         AccessTools.DeclaredMethod(typeof(SaveVideoToDesktopInteractable),
+  //           nameof(SaveVideoToDesktopInteractable.SetRecording))))
+  //     .InsertAndAdvance(
+  //       new CodeInstruction(OpCodes.Nop)
+  //       // new CodeInstruction(OpCodes.Ldarg_0),
+  //       // new CodeInstruction(OpCodes.Pop)
+  //       // new CodeInstruction(OpCodes.Callvirt, AccessTools.DeclaredPropertyGetter(typeof(Component), nameof(Component.gameObject))),
+  //       // new CodeInstruction(OpCodes.Callvirt, AccessTools.DeclaredPropertyGetter(typeof(GameObject), nameof(GameObject.transform))),
+  //       // new CodeInstruction(OpCodes.Callvirt, AccessTools.DeclaredPropertyGetter(typeof(Transform), nameof(Transform.parent))),
+  //       // new CodeInstruction(OpCodes.Callvirt, AccessTools.DeclaredPropertyGetter(typeof(Transform), nameof(Transform.parent))),
+  //       // new CodeInstruction(OpCodes.Callvirt, AccessTools.DeclaredPropertyGetter(typeof(Transform), nameof(Transform.parent))),
+  //       // new CodeInstruction(OpCodes.Ldstr, "SaveVideoToDesktopInteractable"),
+  //       // new CodeInstruction(OpCodes.Callvirt, AccessTools.DeclaredMethod(typeof(Transform), nameof(Transform.Find))),
+  //       // new CodeInstruction(OpCodes.Callvirt, AccessTools.DeclaredPropertyGetter(typeof(Component), nameof(Component.gameObject))),
+  //       // new CodeInstruction(OpCodes.Callvirt, AccessTools.GetDeclaredMethods(typeof(GameObject)).Single(method => method.Name == nameof(GameObject.GetComponentInChildren) && method.ContainsGenericParameters && method.GetParameters().Length == 0).MakeGenericMethod(typeof(LikeInteractable))),
+  //       // new CodeInstruction(OpCodes.Ldarg_0),
+  //       // // IL_029a: ldfld        class CameraRecording UploadCompleteUI/'<DisplayVideoEval>d__15'::recording
+  //       // new CodeInstruction(OpCodes.Ldfld, AccessTools.DeclaredField(enumeratorType, "recording")),
+  //       // new CodeInstruction(OpCodes.Callvirt, AccessTools.DeclaredMethod(typeof(LikeInteractable), nameof(LikeInteractable.SetRecording)))
+  //     )
+  //     .InstructionEnumeration();
+  //   // Escape McScreen/Content/ShowVideoState
+  // }
 }
