@@ -103,6 +103,16 @@ public class FoundFootagePlugin : BaseUnityPlugin {
       try {
         VersionChecker checker = new VersionChecker();
         string remote = await checker.GetVersion();
+        if(remote == VersionChecker.IncompatibleVersion) {
+          // Try to change to new URL
+          if(ServerUrl.Value == "https://foundfootage-server.assasans.dev") {
+            ServerUrl.Value = (string)ServerUrl.DefaultValue;
+            Logger.LogInfo($"Updated server URL to {ServerUrl.Value}");
+
+            remote = await checker.GetVersion();
+          }
+        }
+
         string local = PluginInfo.PLUGIN_VERSION;
         if(checker.IsCompatibleWith(remote, local)) {
           Logger.LogInfo($"Local version {local} is compatible with remote {remote}");
@@ -408,6 +418,8 @@ internal static class VideoCameraPatch {
 }
 
 public class VersionChecker {
+  public static readonly string IncompatibleVersion = "0.0.0 (incompatible)";
+
   public async Task<string> GetVersion() {
     using var httpClient = new HttpClient();
     try {
@@ -418,7 +430,7 @@ public class VersionChecker {
       return await response.Content.ReadAsStringAsync();
     } catch(HttpRequestException exception) {
       FoundFootagePlugin.Logger.LogError($"An error occurred while fetching version: {exception}");
-      return "0.0.0 (incompatible)";
+      return IncompatibleVersion;
     }
   }
 
