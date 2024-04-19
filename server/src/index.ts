@@ -171,6 +171,22 @@ export default {
             return respond(ray, new Response('Too large file', { status: 400 }));
           }
 
+          const areEqual = (first: Uint8Array, second: Uint8Array) => first.length === second.length && first.every((value, index) => value === second[index]);
+
+          const fileContent = await file.arrayBuffer();
+          const signature = new Uint8Array(fileContent.slice(0, 4));
+          const MATROSKA_SIGNATURE = Uint8Array.from([0x1A, 0x45, 0xDF, 0xA3]);
+          if(!areEqual(signature, MATROSKA_SIGNATURE)) {
+            console.error(`Invalid file type`);
+            log('INFO', {
+              action: 'invalid file type uploaded',
+              ray: ray,
+              name: file.name,
+              ip: ip.length > 0 ? ip : null
+            });
+            return respond(ray, new Response('Invalid file type', { status: 400 }));
+          }
+
           const objectKey = `${userId}_${videoId}_${language}_${reason}.webm`;
           console.log({ objectKey, videoId, userId, lobbyId, language, reason, ip });
 
@@ -221,7 +237,7 @@ export default {
             size: file.size
           });
 
-          await env.STORAGE.put(objectKey, file.slice());
+          await env.STORAGE.put(objectKey, fileContent);
 
           return respond(ray, Response.json(response));
         } catch(error) {
