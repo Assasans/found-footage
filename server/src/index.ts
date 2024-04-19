@@ -415,7 +415,7 @@ export default {
               'message' in error &&
               typeof error.message === 'string'
             ) {
-              if(error.message.includes('UNIQUE constraint failed: videos.video_id')) {
+              if(error.message.includes('UNIQUE constraint failed: votes.video_id, votes.user_id')) {
                 log('INFO', {
                   action: 'duplicate vote',
                   ray: ray,
