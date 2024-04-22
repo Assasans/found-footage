@@ -607,14 +607,17 @@ internal static class PhotonGameLobbyHandlerPatch {
         if(success) {
           var path = Path.Combine(recording.GetDirectory(), "fullRecording.webm");
           FoundFootagePlugin.Logger.LogInfo($"Extracted {videoID}: {path}");
-          HttpUtils.UploadFile($"{FoundFootagePlugin.Instance.ServerUrl.Value}/videos", path,
+          HttpUtils.UploadFile(
+            $"{FoundFootagePlugin.Instance.ServerUrl.Value}/videos?local={PluginInfo.PLUGIN_VERSION}",
+            path,
             new Dictionary<string, string> {
               ["video_id"] = recording.videoHandle.id.ToString(),
               ["user_id"] = FoundFootagePlugin.Instance.UserId.Value,
               ["lobby_id"] = PhotonNetwork.CurrentRoom.Name,
               ["language"] = CultureInfo.InstalledUICulture.TwoLetterISOLanguageName,
               ["reason"] = reason
-            });
+            }
+          );
           FoundFootagePlugin.Logger.LogInfo("Uploaded video!");
         } else {
           FoundFootagePlugin.Logger.LogError($"Failed to extract {videoID}");
