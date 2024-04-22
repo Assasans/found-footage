@@ -26,6 +26,7 @@ using Random = System.Random;
 
 namespace FoundFootage;
 
+[ContentWarningPlugin(PluginInfo.PLUGIN_GUID, PluginInfo.PLUGIN_VERSION, false)]
 [BepInPlugin(PluginInfo.PLUGIN_GUID, PluginInfo.PLUGIN_NAME, PluginInfo.PLUGIN_VERSION)]
 public class FoundFootagePlugin : BaseUnityPlugin {
   public const uint ModId = 0x20d82112;
