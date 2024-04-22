@@ -75,7 +75,7 @@ public class FoundFootagePlugin : BaseUnityPlugin {
       "Chance that another team's camera will be spawned (0 to disable).");
     DeathUploadChance = Config.Bind("Chances", "DeathUploadChance", 1f,
       "Chance that the camera video will be uploaded when all team members die (1 - always, 0 to disable).");
-    PassUploadChance = Config.Bind("Chances", "PassUploadChance", 1f,
+    PassUploadChance = Config.Bind("Chances", "PassUploadChance", 0.25f,
       "Chance that the camera video will be uploaded when the team returns to surface (1 - always, 0 to disable).");
 
     // Plugin startup logic
