@@ -41,6 +41,7 @@ public class FoundFootagePlugin : BaseUnityPlugin {
   internal ConfigEntry<string>? ServerUrl { get; private set; }
   internal ConfigEntry<string>? UserId { get; private set; }
   internal ConfigEntry<bool>? WarningShown { get; private set; }
+  internal ConfigEntry<int>? ConfigVersion { get; private set; }
 
   internal ConfigEntry<bool>? VotingEnabled { get; private set; }
 
@@ -68,6 +69,7 @@ public class FoundFootagePlugin : BaseUnityPlugin {
     }
 
     WarningShown = Config.Bind("Internal", "WarningShown", false, "");
+    ConfigVersion = Config.Bind("Internal", "ConfigVersion", 1, "");
 
     VotingEnabled = Config.Bind("Voting", "VotingEnabled", true, "Enable voting after watching another team's video.");
 
@@ -88,6 +90,15 @@ public class FoundFootagePlugin : BaseUnityPlugin {
       MyceliumNetwork.RegisterNetworkObject(this, ModId);
     } catch(Exception exception) {
       Logger.LogInfo(exception);
+    }
+
+    if(ConfigVersion.Value < 2) {
+      ConfigVersion.Value = 2;
+      if(Math.Abs(PassUploadChance.Value - 1f) < 0.01) {
+        PassUploadChance.Value = (float)PassUploadChance.DefaultValue;
+        Logger.LogInfo($"Set PassUploadChance to {PassUploadChance.Value}");
+      }
+      Logger.LogInfo($"Migrated to config version {ConfigVersion.Value}");
     }
 
     if(!WarningShown.Value) {
