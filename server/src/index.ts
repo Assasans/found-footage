@@ -1,11 +1,15 @@
 import { AwsClient } from 'aws4fetch';
 
+type RatelimitConfig = { TIMEFRAME: string; THRESHOLD: string; BAN_THRESHOLD: string };
+
 export interface Env {
   SOURCES_URL: string;
   CONTACT_EMAIL: string;
   CLIENT_VERSION: string;
   R2_SIGNING: { ACCESS_KEY_ID: string, SECRET_ACCESS_KEY: string, CLOUDFLARE_ACCOUNT: string, BUCKET: string };
   LOKI: { URL: string, AUTH: string } | undefined;
+  CLOUDFLARE_AUTH: { EMAIL: string, KEY: string };
+  RATELIMITS: { ACCESS: RatelimitConfig; NO_ROUTE: RatelimitConfig };
 
   DB: D1Database;
   STORAGE: R2Bucket;
@@ -25,6 +29,14 @@ interface VideoResponse {
   available: boolean;
   ip: string;
   timestamp: string;
+}
+
+interface RatelimitResponse {
+  ip: string;
+  asn: string;
+  timestamp: string;
+  type: string;
+  count: number;
 }
 
 function normalizePathname(pathname: string) {
@@ -93,6 +105,83 @@ function respond(ray: string, response: Response): Response {
   return response;
 }
 
+async function blockIp(env: Env, result: RatelimitResponse, request: Request, pathname: string, ray: string, ip: string) {
+  const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${env.R2_SIGNING.CLOUDFLARE_ACCOUNT}/firewall/access_rules/rules`, {
+    headers: {
+      'X-Auth-Email': env.CLOUDFLARE_AUTH.EMAIL,
+      'X-Auth-Key': env.CLOUDFLARE_AUTH.KEY,
+      'Content-Type': 'application/json',
+      'X-Cross-Site-Security': 'dash'
+    },
+    method: 'POST',
+    body: JSON.stringify({
+      id: '',
+      configuration: {
+        target: 'ip',
+        value: ip
+      },
+      mode: 'block',
+      notes: `(auto) Ratelimit reached (requests: ${result.count}, type: ${result.type}, ASN: ${request.cf?.asn})`,
+      scope: {
+        type: 'account'
+      }
+    }),
+  });
+
+  log('INFO', {
+    action: 'secondary rate limit exceeded',
+    ray: ray,
+    method: request.method,
+    path: pathname,
+    host: request.headers.get('host'),
+    block_response: response.status,
+    ip: ip.length > 0 ? ip : null
+  });
+
+  if(response.ok) {
+    const data = await response.text();
+    log('ERROR', {
+      action: 'block failed',
+      ray: ray,
+      block_response: data,
+      ip: ip.length > 0 ? ip : null
+    });
+  }
+}
+
+async function getRateLimit(env: Env, request: Request, config: RatelimitConfig, ip: string, type: string): Promise<RatelimitResponse | null> {
+  const QUERY = `
+    SELECT * FROM ratelimits WHERE ip = ? AND strftime('%s', CURRENT_TIMESTAMP) - strftime('%s', timestamp) <= ${Number(config.TIMEFRAME)} AND type = ?
+  `;
+
+  return await env.DB.prepare(QUERY)
+    .bind(ip, type)
+    .first();
+}
+
+async function incrementRateLimit(env: Env, request: Request, config: RatelimitConfig, ip: string, type: string): Promise<RatelimitResponse> {
+  const QUERY = `
+    INSERT INTO ratelimits (ip, asn, timestamp, type, count)
+    VALUES (?, ?, CURRENT_TIMESTAMP, ?, 1)
+    ON CONFLICT (ip) DO UPDATE
+    SET
+      timestamp = CURRENT_TIMESTAMP,
+      count = CASE
+        WHEN strftime('%s', CURRENT_TIMESTAMP) - strftime('%s', timestamp) <= ${Number(config.TIMEFRAME)} THEN count + 1
+        ELSE 1
+      END
+    RETURNING *
+  `;
+
+  const response = await env.DB.prepare(QUERY)
+    .bind(ip, String(request.cf?.asn), type)
+    .run();
+
+  // @ts-ignore there is
+  const result: RatelimitResponse = response.results[0];
+  return result;
+}
+
 export default {
   async fetch(request: Request, env: Env) {
     try {
@@ -114,8 +203,48 @@ export default {
       log('TRACE', {
         action: 'trace request',
         ray: ray,
-        headers: [...request.headers.entries()]
+        headers: [...request.headers.entries()],
+        ip: ip.length > 0 ? ip : null
       });
+
+      {
+        const ratelimit = await incrementRateLimit(env, request, env.RATELIMITS.ACCESS, ip, 'access');
+        if(ratelimit.count > Number(env.RATELIMITS.ACCESS.BAN_THRESHOLD)) {
+          await blockIp(env, ratelimit, request, pathname, ray, ip);
+          return respond(ray, Response.json('You are getting permanently banned...', { status: 429, statusText: 'Too Many Requests' }));  
+        }
+
+        if(ratelimit.count > Number(env.RATELIMITS.ACCESS.THRESHOLD)) {
+          log('DEBUG', {
+            action: 'primary rate limit exceeded',
+            ray: ray,
+            method: request.method,
+            path: pathname,
+            host: request.headers.get('host'),
+            ip: ip.length > 0 ? ip : null
+          });
+          return respond(ray, Response.json('Shut the fuck up (access)', { status: 429, statusText: 'Too Many Requests' }));  
+        }
+      }
+
+      {
+        const ratelimit = await getRateLimit(env, request, env.RATELIMITS.NO_ROUTE, ip, 'no-route');
+        if(ratelimit && ratelimit.count > Number(env.RATELIMITS.NO_ROUTE.THRESHOLD)) {
+          log('DEBUG', {
+            action: 'primary rate limit exceeded (early return)',
+            ray: ray,
+            method: request.method,
+            path: pathname,
+            host: request.headers.get('host'),
+            ip: ip.length > 0 ? ip : null
+          });
+          return respond(ray, Response.json('Shut the fuck up (no route early)', { status: 429, statusText: 'Too Many Requests' }));  
+        }
+      }
+
+      if(pathname === '/favicon.ico') {
+        return respond(ray, new Response(null, { status: 204, statusText: 'No Content' }));  
+      }
 
       if(request.method === 'GET' && pathname === '/version') {
         log('TRACE', {
@@ -448,7 +577,34 @@ export default {
         path: pathname,
         ip: ip.length > 0 ? ip : null
       });
+
+      {
+        const ratelimit = await incrementRateLimit(env, request, env.RATELIMITS.NO_ROUTE, ip, 'no-route');
+        if(ratelimit.count > Number(env.RATELIMITS.NO_ROUTE.BAN_THRESHOLD)) {
+          await blockIp(env, ratelimit, request, pathname, ray, ip);
+          return respond(ray, Response.json('You are getting permanently banned...', { status: 429, statusText: 'Too Many Requests' }));  
+        }
+
+        if(ratelimit.count > Number(env.RATELIMITS.NO_ROUTE.THRESHOLD)) {
+          log('DEBUG', {
+            action: 'primary rate limit exceeded',
+            ray: ray,
+            method: request.method,
+            path: pathname,
+            host: request.headers.get('host'),
+            ip: ip.length > 0 ? ip : null
+          });
+          return respond(ray, Response.json('Shut the fuck up (no route)', { status: 429, statusText: 'Too Many Requests' }));  
+        }
+      }
+
       return respond(ray, new Response('Not found', { status: 404 }));
+    } catch(error) {
+      console.error('unexpected error', error);
+      log('ERROR', {
+        action: 'unexpected error',
+        error: error instanceof Error ? error.toString() : error
+      });
     } finally {
       await sendLogs(env);
     }
