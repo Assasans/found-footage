@@ -430,6 +430,7 @@ internal static class VideoCameraPatch {
     clip.isRecording = false;
     clip.encoded = true;
     clip.SetContentBufffer(new ContentBuffer());
+    clip.SetValid(true);
     recording.AddNewClip(clip);
 
     var directory = clip.GetClipDirectory();
