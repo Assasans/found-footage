@@ -16,6 +16,7 @@ using BepInEx.Configuration;
 using BepInEx.Logging;
 using HarmonyLib;
 using MyceliumNetworking;
+using MyceliumPluginInfo = MyceliumNetworking.MyPluginInfo;
 using Photon.Pun;
 using TMPro;
 using UnityEngine;
@@ -28,6 +29,7 @@ namespace FoundFootage;
 
 [ContentWarningPlugin(PluginInfo.PLUGIN_GUID, PluginInfo.PLUGIN_VERSION, false)]
 [BepInPlugin(PluginInfo.PLUGIN_GUID, PluginInfo.PLUGIN_NAME, PluginInfo.PLUGIN_VERSION)]
+[BepInDependency(MyceliumPluginInfo.PLUGIN_GUID, MyceliumPluginInfo.PLUGIN_VERSION)]
 public class FoundFootagePlugin : BaseUnityPlugin {
   public const uint ModId = 0x20d82112;
 
@@ -87,11 +89,7 @@ public class FoundFootagePlugin : BaseUnityPlugin {
     Logger.LogInfo($"Plugin {PluginInfo.PLUGIN_GUID} patched!");
     Logger.LogInfo($"Server URL: {Instance.ServerUrl?.Value}");
 
-    try {
-      MyceliumNetwork.RegisterNetworkObject(this, ModId);
-    } catch(Exception exception) {
-      Logger.LogInfo(exception);
-    }
+    MyceliumNetwork.RegisterNetworkObject(this, ModId);
 
     if(ConfigVersion.Value < 2) {
       ConfigVersion.Value = 2;
