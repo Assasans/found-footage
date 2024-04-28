@@ -41,6 +41,7 @@ public class FoundFootagePlugin : BaseUnityPlugin {
   internal Random Random { get; private set; }
   internal List<VideoHandle> FakeVideos { get; private set; }
   internal List<VideoHandle> ProcessedFakeVideos { get; private set; }
+  internal List<VideoHandle> SentVideos { get; private set; }
   internal Dictionary<VideoHandle, string> ClientToServerId { get; private set; }
 
   internal ConfigEntry<string>? ServerUrl { get; private set; }
@@ -61,6 +62,7 @@ public class FoundFootagePlugin : BaseUnityPlugin {
     Random = new Random();
     FakeVideos = new List<VideoHandle>();
     ProcessedFakeVideos = new List<VideoHandle>();
+    SentVideos = new List<VideoHandle>();
     ClientToServerId = new Dictionary<VideoHandle, string>();
 
     ServerUrl = Config.Bind("Internal", "ServerUrl", "https://foundfootage-server.assasans.dev",
@@ -652,6 +654,13 @@ internal static class PhotonGameLobbyHandlerPatch {
   }
 
   public static void UploadRecording(VideoHandle videoID, CameraRecording recording, string reason, Vector3? position) {
+    // I have no idea why it is being called multiple times, both for deaths and extracts.
+    if(FoundFootagePlugin.Instance.SentVideos.Contains(videoID)) {
+      FoundFootagePlugin.Logger.LogWarning($"Not uploading duplicate video {videoID}");
+      return;
+    }
+    FoundFootagePlugin.Instance.SentVideos.Add(videoID);
+
     // Must be called from a main thread
     var contentBuffer = SerializeContentBuffer(recording);
     new Thread(() => {
