@@ -19,9 +19,11 @@ using MyceliumNetworking;
 using MyceliumPluginInfo = MyceliumNetworking.MyPluginInfo;
 using Photon.Pun;
 using TMPro;
+using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Localization.PropertyVariants;
 using UnityEngine.UI;
+using Zorro.Core.Serizalization;
 using Object = UnityEngine.Object;
 using Random = System.Random;
 
@@ -97,6 +99,7 @@ public class FoundFootagePlugin : BaseUnityPlugin {
         PassUploadChance.Value = (float)PassUploadChance.DefaultValue;
         Logger.LogInfo($"Set PassUploadChance to {PassUploadChance.Value}");
       }
+
       Logger.LogInfo($"Migrated to config version {ConfigVersion.Value}");
     }
 
@@ -188,6 +191,51 @@ public static class HttpUtils {
 
       // Write end boundary
       byte[] endBoundaryBytes = Encoding.ASCII.GetBytes("\r\n--" + boundary + "--\r\n");
+      requestStream.Write(endBoundaryBytes, 0, endBoundaryBytes.Length);
+    }
+
+    try {
+      using WebResponse response = request.GetResponse();
+      using Stream responseStream = response.GetResponseStream();
+      using StreamReader reader = new StreamReader(responseStream);
+      string responseText = reader.ReadToEnd();
+      FoundFootagePlugin.Logger.LogInfo(responseText);
+    } catch(WebException exception) {
+      FoundFootagePlugin.Logger.LogError($"Error: {exception}");
+    }
+  }
+
+  public static void UploadFile2(string url, string filePath, Dictionary<String, String> properties,
+    byte[] contentBuffer) {
+    string boundary = "---------------------------" + DateTime.Now.Ticks.ToString("x");
+    HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
+    request.Method = "PUT";
+    request.ContentType = "multipart/form-data; boundary=" + boundary;
+
+    using(Stream requestStream = request.GetRequestStream()) {
+      // Write boundary and file header
+      WriteBoundary(requestStream, boundary);
+      foreach(var (key, value) in properties) {
+        WriteFormValue(requestStream, key, value, boundary);
+      }
+
+      // Write file content
+      WriteFile(requestStream, filePath, boundary);
+
+      // Write end boundary
+      WriteBoundary(requestStream, boundary);
+      byte[] endBoundaryBytes = Encoding.ASCII.GetBytes("\r\n--" + boundary + "--\r\n");
+      requestStream.Write(endBoundaryBytes, 0, endBoundaryBytes.Length);
+
+      WriteBoundary(requestStream, boundary);
+      string headerTemplate =
+        "Content-Disposition: form-data; name=\"file\"; filename=\"{0}\"\r\nContent-Type: application/octet-stream\r\n\r\n";
+      string header = string.Format(headerTemplate, "content_buffer");
+      byte[] headerBytes = Encoding.UTF8.GetBytes(header);
+      requestStream.Write(headerBytes, 0, headerBytes.Length);
+      requestStream.Write(contentBuffer);
+
+      // Write end boundary
       requestStream.Write(endBoundaryBytes, 0, endBoundaryBytes.Length);
     }
 
@@ -519,9 +567,9 @@ internal static class ExtractVideoMachinePatch {
       if(GuidUtils.IsLocal(videoID.id)) continue;
 
       if(FoundFootagePlugin.Instance.Random.NextDouble() <= FoundFootagePlugin.Instance.PassUploadChance.Value) {
-        PhotonGameLobbyHandlerPatch.UploadRecording(videoID, recording, "extract");
+        PhotonGameLobbyHandlerPatch.UploadRecording(videoID, recording, "extract", null);
       } else {
-        FoundFootagePlugin.Logger.LogInfo("Do not extracting");
+        FoundFootagePlugin.Logger.LogInfo("Do not uploading extracted");
       }
     }
   }
@@ -575,12 +623,24 @@ internal static class PhotonGameLobbyHandlerPatch {
 
       __instance.StartCoroutine(WaitThen(5f, () => {
         var recordings = RecordingsHandler.GetRecordings();
+        var cameras = (Dictionary<Guid, VideoCamera>)AccessTools.DeclaredField(typeof(CameraHandler), "m_cameras")
+          .GetValue(CameraHandler.Instance);
         foreach(var (videoID, recording) in recordings) {
           FoundFootagePlugin.Logger.LogInfo($"Check {videoID}");
           if(GuidUtils.IsLocal(videoID.id)) continue;
 
           if(FoundFootagePlugin.Instance.Random.NextDouble() <= FoundFootagePlugin.Instance.DeathUploadChance.Value) {
-            UploadRecording(videoID, recording, "death");
+            var camera = cameras.Values.SingleOrDefault(camera => {
+              var entry = (VideoInfoEntry)AccessTools.DeclaredField(typeof(VideoCamera), "m_recorderInfoEntry")
+                .GetValue(camera);
+              return entry.videoID.id == videoID.id;
+            });
+
+            // Unity is cursed, cannot use `?.` because lifetime checks...
+            var position = camera != null
+              ? camera.transform != null ? camera.transform.position : (Vector3?)null
+              : null;
+            UploadRecording(videoID, recording, "death", position);
           } else {
             FoundFootagePlugin.Logger.LogInfo("Do not extracting");
           }
@@ -591,7 +651,9 @@ internal static class PhotonGameLobbyHandlerPatch {
     }
   }
 
-  public static void UploadRecording(VideoHandle videoID, CameraRecording recording, string reason) {
+  public static void UploadRecording(VideoHandle videoID, CameraRecording recording, string reason, Vector3? position) {
+    // Must be called from a main thread
+    var contentBuffer = SerializeContentBuffer(recording);
     new Thread(() => {
       try {
         bool success = false;
@@ -599,25 +661,41 @@ internal static class PhotonGameLobbyHandlerPatch {
           success |= RecordingsHandler.Instance.ExtractRecording(recording);
           if(success) break;
 
-          Thread.Sleep(5000);
           FoundFootagePlugin.Logger.LogWarning($"Failed to extract {videoID}, retrying...");
+          Thread.Sleep(5000);
         }
 
         if(success) {
           var path = Path.Combine(recording.GetDirectory(), "fullRecording.webm");
           FoundFootagePlugin.Logger.LogInfo($"Extracted {videoID}: {path}");
-          HttpUtils.UploadFile(
-            $"{FoundFootagePlugin.Instance.ServerUrl.Value}/videos?local={PluginInfo.PLUGIN_VERSION}",
-            path,
-            new Dictionary<string, string> {
-              ["video_id"] = recording.videoHandle.id.ToString(),
-              ["user_id"] = FoundFootagePlugin.Instance.UserId.Value,
-              ["lobby_id"] = PhotonNetwork.CurrentRoom.Name,
-              ["language"] = CultureInfo.InstalledUICulture.TwoLetterISOLanguageName,
-              ["reason"] = reason
+
+          for(int attempt = 0; attempt < 10; attempt++) {
+            try {
+              HttpUtils.UploadFile2(
+                $"{FoundFootagePlugin.Instance.ServerUrl.Value}/videos?local={PluginInfo.PLUGIN_VERSION}",
+                path,
+                new Dictionary<string, string> {
+                  ["video_id"] = recording.videoHandle.id.ToString(),
+                  ["user_id"] = FoundFootagePlugin.Instance.UserId.Value,
+                  ["lobby_id"] = PhotonNetwork.CurrentRoom.Name,
+                  ["language"] = CultureInfo.InstalledUICulture.TwoLetterISOLanguageName,
+                  ["position"] = position != null ? $"{position.Value.x},{position.Value.y},{position.Value.z}" : "",
+                  ["version"] = PluginInfo.PLUGIN_VERSION,
+                  ["reason"] = reason
+                },
+                contentBuffer
+              );
+              FoundFootagePlugin.Logger.LogInfo("Uploaded video!");
+
+              break;
+            } catch(IOException exception) {
+              // Issue #14
+              // I have no idea what could be holding a write lock on a file, so just keep trying until it succeeds...
+              FoundFootagePlugin.Logger.LogWarning(exception);
+              FoundFootagePlugin.Logger.LogWarning($"Failed to upload {videoID}, retrying...");
+              Thread.Sleep(5000);
             }
-          );
-          FoundFootagePlugin.Logger.LogInfo("Uploaded video!");
+          }
         } else {
           FoundFootagePlugin.Logger.LogError($"Failed to extract {videoID}");
         }
@@ -625,6 +703,22 @@ internal static class PhotonGameLobbyHandlerPatch {
         FoundFootagePlugin.Logger.LogError(exception);
       }
     }).Start();
+  }
+
+  private static byte[] SerializeContentBuffer(CameraRecording recording) {
+    ContentBuffer buffer = new ContentBuffer();
+    foreach(Clip clip in recording.GetAllClips()) {
+      if(!clip.Valid) continue;
+      if(clip.TryGetContentBuffer(out var contentBuffer)) {
+        buffer.AddBuffer(contentBuffer);
+      } else {
+        FoundFootagePlugin.Logger.LogWarning($"No content buffer found for clip: {clip.clipID}");
+      }
+    }
+
+    BinarySerializer serializer = new BinarySerializer(512, Allocator.Temp);
+    buffer.Serialize(serializer);
+    return serializer.buffer.ToArray();
   }
 }
 
