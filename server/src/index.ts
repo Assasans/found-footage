@@ -280,22 +280,23 @@ export default {
           const version = formData.get('version') as string | null;
           const day = formData.get('day') as string | null;
           const contentBuffer = formData.get('content_buffer') as string | null;
+          const playerCount = formData.get('player_count') as string | null;
           const secretUserId = formData.get('secret_user_id') as string | null;
           const file = formData.get('file') as File | null;
-          if(!version && reason === 'extract' && Math.random() < 0.9) {
-            console.log('Reject randomly');
-            log('INFO', {
-              action: 'reject randomly',
-              ray: ray,
-              video_id: videoId,
-              user_id: userId,
-              lobby_id: lobbyId,
-              language,
-              reason,
-              ip: ip.length > 0 ? ip : null
-            });
-            return respond(ray, new Response('Rejected randomly', { status: 400 }));
-          }
+          // if(!version && reason === 'extract' && Math.random() < 0.9) {
+          //   console.log('Reject randomly');
+          //   log('INFO', {
+          //     action: 'reject randomly',
+          //     ray: ray,
+          //     video_id: videoId,
+          //     user_id: userId,
+          //     lobby_id: lobbyId,
+          //     language,
+          //     reason,
+          //     ip: ip.length > 0 ? ip : null
+          //   });
+          //   return respond(ray, new Response('Rejected randomly', { status: 400 }));
+          // }
 
           // Bruh
           // console.log('tes123t', { aanb: version, cc: position, dd: day, aa: contentBuffer });
@@ -347,7 +348,7 @@ export default {
           }
 
           const objectKey = `${userId}_${videoId}_${language}_${reason}.webm`;
-          console.log({ objectKey, videoId, userId, lobbyId, language, reason, version, day, position, secretUserId, ip });
+          console.log({ objectKey, videoId, userId, lobbyId, language, reason, version, day, position, secretUserId, playerCount, ip });
 
           let response;
           try {
@@ -366,11 +367,12 @@ export default {
               position,
               content_buffer: contentBuffer,
               secret_user_id: secretUserId,
+              player_count: playerCount,
               ip
             });
 
-            response = await env.DB.prepare('INSERT INTO videos (video_id, user_id, language, reason, object, available, ip, timestamp, lobby_id, version, day, position, content_buffer, secret_user_id) VALUES (?, ?, ?, ?, ?, true, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?)')
-              .bind(videoId, userId, language, reason, objectKey, ip, lobbyId, version, day, position?.length ? position : null, contentBuffer, secretUserId)
+            response = await env.DB.prepare('INSERT INTO videos (video_id, user_id, language, reason, object, available, ip, timestamp, lobby_id, version, day, position, content_buffer, secret_user_id, player_count) VALUES (?, ?, ?, ?, ?, true, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?)')
+              .bind(videoId, userId, language, reason, objectKey, ip, lobbyId, version, day, position?.length ? position : null, contentBuffer, secretUserId, playerCount)
               .run();
           } catch(error) {
             console.error('Database error', error);
