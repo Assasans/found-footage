@@ -21,6 +21,7 @@ using Photon.Pun;
 using TMPro;
 using Unity.Collections;
 using UnityEngine;
+using UnityEngine.Assertions;
 using UnityEngine.Localization.PropertyVariants;
 using UnityEngine.UI;
 using Zorro.Core.Serizalization;
@@ -42,14 +43,20 @@ public class FoundFootagePlugin : BaseUnityPlugin {
   internal List<VideoHandle> FakeVideos { get; private set; }
   internal List<VideoHandle> ProcessedFakeVideos { get; private set; }
   internal List<VideoHandle> SentVideos { get; private set; }
+  internal List<VideoHandle> SentVotes { get; private set; }
   internal Dictionary<VideoHandle, string> ClientToServerId { get; private set; }
+
+  internal ConfigFile PersistentConfig { get; private set; }
 
   internal ConfigEntry<string>? ServerUrl { get; private set; }
   internal ConfigEntry<string>? UserId { get; private set; }
+  internal ConfigEntry<string>? SecretUserId { get; private set; }
   internal ConfigEntry<bool>? WarningShown { get; private set; }
   internal ConfigEntry<int>? ConfigVersion { get; private set; }
 
   internal ConfigEntry<bool>? VotingEnabled { get; private set; }
+  internal ConfigEntry<bool>? SendPositionEnabled { get; private set; }
+  internal ConfigEntry<bool>? SendContentBufferEnabled { get; private set; }
 
   internal ConfigEntry<float>? SpawnChance { get; private set; }
   internal ConfigEntry<float>? DeathUploadChance { get; private set; }
@@ -63,22 +70,44 @@ public class FoundFootagePlugin : BaseUnityPlugin {
     FakeVideos = new List<VideoHandle>();
     ProcessedFakeVideos = new List<VideoHandle>();
     SentVideos = new List<VideoHandle>();
+    SentVotes = new List<VideoHandle>();
     ClientToServerId = new Dictionary<VideoHandle, string>();
 
-    ServerUrl = Config.Bind("Internal", "ServerUrl", "https://foundfootage-server.assasans.dev",
-      "Base URL of the server hosting the videos.\n### DATA REQUEST OR REMOVAL ###\nIf you want to request your data or have it removed:\nsend an email to the address available on the \"/info\" endpoint (e.g. https://server.local/info).\nNote that your email must include your User ID (see below).");
-    UserId = Config.Bind("Internal", "UserId", "",
-      "Random identifier associated with uploaded recordings. Can be used to remove your data.");
+    BepInPlugin metadata = MetadataHelper.GetMetadata(this);
+    Assert.IsNotNull(metadata); // Unreachable, checked in base class constructor
+    var persistentConfigPath = Path.Combine(Paths.BepInExRootPath, "persistent-config");
+    PersistentConfig = new ConfigFile(
+      Utility.CombinePaths(persistentConfigPath, $"{metadata.GUID}.cfg"),
+      false,
+      metadata
+    );
+
+    ServerUrl = PersistentConfig.Bind("Internal", "ServerUrl", "https://foundfootage-server.assasans.dev",
+      "Base URL of the server hosting the videos.\n### DATA REQUEST OR REMOVAL ###\nIf you want to request your data or have it removed:\nsend an email to the address available on the \"/info\" endpoint (e.g. https://server.local/info).\nNote that your email must include your Secret User ID (see below).");
+    UserId = PersistentConfig.Bind("Internal", "UserId", "",
+      "Random identifier associated with uploaded recordings and votes.");
+    SecretUserId = PersistentConfig.Bind("Internal", "SecretUserId", "",
+      "Random identifier associated with Public User ID. Can be used to request or remove your data.");
     if(UserId.Value == (string)UserId.DefaultValue) {
       UserId.Value = Guid.NewGuid().ToString();
-      Config.Save();
+      PersistentConfig.Save();
       Logger.LogInfo($"Generated user UUID: {UserId.Value}");
     }
 
-    WarningShown = Config.Bind("Internal", "WarningShown", false, "");
+    if(SecretUserId.Value == (string)SecretUserId.DefaultValue) {
+      SecretUserId.Value = Guid.NewGuid().ToString();
+      PersistentConfig.Save();
+      Logger.LogInfo($"Generated secret user UUID: {new string('*', UserId.Value.Length)}");
+    }
+
+    WarningShown = PersistentConfig.Bind("Internal", "WarningShown", false, "");
     ConfigVersion = Config.Bind("Internal", "ConfigVersion", 1, "");
 
     VotingEnabled = Config.Bind("Voting", "VotingEnabled", true, "Enable voting after watching another team's video.");
+    SendPositionEnabled = Config.Bind("Voting", "SendPositionEnabled", true,
+      "Send camera position on death to spawn camera at same position for other teams.");
+    SendContentBufferEnabled = Config.Bind("Voting", "SendContentBufferEnabled", true,
+      "Send recording content buffer (scoring data) to allow your videos to give views when viewed by other teams.");
 
     SpawnChance = Config.Bind("Chances", "SpawnChance", 0.3f,
       "Chance that another team's camera will be spawned (0 to disable).");
@@ -185,6 +214,7 @@ public static class HttpUtils {
       // Write boundary and file header
       WriteBoundary(requestStream, boundary);
       foreach(var (key, value) in properties) {
+        FoundFootagePlugin.Logger.LogInfo($"Property {key}: {value}");
         WriteFormValue(requestStream, key, value, boundary);
       }
 
@@ -193,51 +223,6 @@ public static class HttpUtils {
 
       // Write end boundary
       byte[] endBoundaryBytes = Encoding.ASCII.GetBytes("\r\n--" + boundary + "--\r\n");
-      requestStream.Write(endBoundaryBytes, 0, endBoundaryBytes.Length);
-    }
-
-    try {
-      using WebResponse response = request.GetResponse();
-      using Stream responseStream = response.GetResponseStream();
-      using StreamReader reader = new StreamReader(responseStream);
-      string responseText = reader.ReadToEnd();
-      FoundFootagePlugin.Logger.LogInfo(responseText);
-    } catch(WebException exception) {
-      FoundFootagePlugin.Logger.LogError($"Error: {exception}");
-    }
-  }
-
-  public static void UploadFile2(string url, string filePath, Dictionary<String, String> properties,
-    byte[] contentBuffer) {
-    string boundary = "---------------------------" + DateTime.Now.Ticks.ToString("x");
-    HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
-    request.Method = "PUT";
-    request.ContentType = "multipart/form-data; boundary=" + boundary;
-
-    using(Stream requestStream = request.GetRequestStream()) {
-      // Write boundary and file header
-      WriteBoundary(requestStream, boundary);
-      foreach(var (key, value) in properties) {
-        WriteFormValue(requestStream, key, value, boundary);
-      }
-
-      // Write file content
-      WriteFile(requestStream, filePath, boundary);
-
-      // Write end boundary
-      WriteBoundary(requestStream, boundary);
-      byte[] endBoundaryBytes = Encoding.ASCII.GetBytes("\r\n--" + boundary + "--\r\n");
-      requestStream.Write(endBoundaryBytes, 0, endBoundaryBytes.Length);
-
-      WriteBoundary(requestStream, boundary);
-      string headerTemplate =
-        "Content-Disposition: form-data; name=\"file\"; filename=\"{0}\"\r\nContent-Type: application/octet-stream\r\n\r\n";
-      string header = string.Format(headerTemplate, "content_buffer");
-      byte[] headerBytes = Encoding.UTF8.GetBytes(header);
-      requestStream.Write(headerBytes, 0, headerBytes.Length);
-      requestStream.Write(contentBuffer);
-
-      // Write end boundary
       requestStream.Write(endBoundaryBytes, 0, endBoundaryBytes.Length);
     }
 
@@ -659,10 +644,13 @@ internal static class PhotonGameLobbyHandlerPatch {
       FoundFootagePlugin.Logger.LogWarning($"Not uploading duplicate video {videoID}");
       return;
     }
+
     FoundFootagePlugin.Instance.SentVideos.Add(videoID);
 
     // Must be called from a main thread
-    var contentBuffer = SerializeContentBuffer(recording);
+    var contentBuffer = FoundFootagePlugin.Instance.SendContentBufferEnabled.Value
+      ? SerializeContentBuffer(recording)
+      : null;
     new Thread(() => {
       try {
         bool success = false;
@@ -680,19 +668,23 @@ internal static class PhotonGameLobbyHandlerPatch {
 
           for(int attempt = 0; attempt < 10; attempt++) {
             try {
-              HttpUtils.UploadFile2(
+              FoundFootagePlugin.Logger.LogInfo($"Content buffer: {contentBuffer?.Length ?? 0} bytes");
+              HttpUtils.UploadFile(
                 $"{FoundFootagePlugin.Instance.ServerUrl.Value}/videos?local={PluginInfo.PLUGIN_VERSION}",
                 path,
                 new Dictionary<string, string> {
                   ["video_id"] = recording.videoHandle.id.ToString(),
                   ["user_id"] = FoundFootagePlugin.Instance.UserId.Value,
+                  ["secret_user_id"] = FoundFootagePlugin.Instance.SecretUserId.Value,
                   ["lobby_id"] = PhotonNetwork.CurrentRoom.Name,
                   ["language"] = CultureInfo.InstalledUICulture.TwoLetterISOLanguageName,
-                  ["position"] = position != null ? $"{position.Value.x},{position.Value.y},{position.Value.z}" : "",
+                  ["position"] = position != null ? $"{position.Value.x}@{position.Value.y}@{position.Value.z}" : "",
                   ["version"] = PluginInfo.PLUGIN_VERSION,
-                  ["reason"] = reason
-                },
-                contentBuffer
+                  ["day"] = SurfaceNetworkHandler.RoomStats.CurrentDay.ToString(),
+                  ["reason"] = reason,
+                  // multipart/form-data is cursed, and FCL is even more cursed, so the easiest way is to just Base64 encode...
+                  ["content_buffer"] = contentBuffer != null ? Convert.ToBase64String(contentBuffer) : ""
+                }
               );
               FoundFootagePlugin.Logger.LogInfo("Uploaded video!");
 

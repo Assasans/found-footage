@@ -24,8 +24,16 @@ public class LikeInteractable : Interactable {
       return;
     }
 
+    // Button is supposed to disable itself, but someone still spammed voting requests...
+    if(FoundFootagePlugin.Instance.SentVotes.Contains(_recording.videoHandle)) {
+      return;
+    }
+
     new Thread(() => {
+      _enabled = false;
+      FoundFootagePlugin.Instance.SentVotes.Add(_recording.videoHandle);
       FoundFootagePlugin.Logger.LogInfo($"Sending vote for {videoId}...");
+
       try {
         VoteUtils.SendVote(videoId, VoteType.Like).GetAwaiter().GetResult();
         HelmetText.Instance.SetHelmetText("Thank you for voting", 3);
@@ -34,7 +42,6 @@ public class LikeInteractable : Interactable {
       }
 
       FoundFootagePlugin.Logger.LogInfo("Sent vote");
-      _enabled = false;
     }).Start();
   }
 
@@ -58,8 +65,16 @@ public class DislikeInteractable : Interactable {
       return;
     }
 
+    // Button is supposed to disable itself, but someone still spammed voting requests...
+    if(FoundFootagePlugin.Instance.SentVotes.Contains(_recording.videoHandle)) {
+      return;
+    }
+
     new Thread(() => {
+      _enabled = false;
+      FoundFootagePlugin.Instance.SentVotes.Add(_recording.videoHandle);
       FoundFootagePlugin.Logger.LogInfo($"Sending vote for {videoId}...");
+
       try {
         VoteUtils.SendVote(videoId, VoteType.Dislike).GetAwaiter().GetResult();
         HelmetText.Instance.SetHelmetText("Thank you for voting", 3);
@@ -68,7 +83,6 @@ public class DislikeInteractable : Interactable {
       }
 
       FoundFootagePlugin.Logger.LogInfo("Sent vote");
-      _enabled = false;
     }).Start();
     HelmetText.Instance.SetHelmetText("Thank you for voting", 3);
   }
