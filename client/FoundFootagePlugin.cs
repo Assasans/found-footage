@@ -681,6 +681,7 @@ internal static class PhotonGameLobbyHandlerPatch {
                   ["position"] = position != null ? $"{position.Value.x}@{position.Value.y}@{position.Value.z}" : "",
                   ["version"] = PluginInfo.PLUGIN_VERSION,
                   ["day"] = SurfaceNetworkHandler.RoomStats.CurrentDay.ToString(),
+                  ["player_count"] = Object.FindObjectsOfType<Player>().Count(pl => !pl.ai).ToString(),
                   ["reason"] = reason,
                   // multipart/form-data is cursed, and FCL is even more cursed, so the easiest way is to just Base64 encode...
                   ["content_buffer"] = contentBuffer != null ? Convert.ToBase64String(contentBuffer) : ""
