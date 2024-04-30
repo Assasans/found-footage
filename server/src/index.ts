@@ -83,7 +83,7 @@ async function sendLogs(env: Env) {
   };
   LOGS.length = 0;
 
-  console.log('Sendings logs', JSON.stringify(body));
+  // console.log('Sendings logs', JSON.stringify(body));
   const response = await fetch(env.LOKI.URL, {
     method: 'POST',
     body: JSON.stringify(body),
@@ -92,7 +92,7 @@ async function sendLogs(env: Env) {
       'Authorization': `Basic ${btoa(env.LOKI.AUTH)}`
     }
   })
-  console.log(response.status, await response.text());
+  // console.log(response.status, await response.text());
 }
 
 function respond(ray: string, response: Response): Response {
@@ -134,6 +134,8 @@ async function blockIp(env: Env, result: RatelimitResponse, request: Request, pa
     method: request.method,
     path: pathname,
     host: request.headers.get('host'),
+    type: result.type,
+    count: result.count,
     block_response: response.status,
     ip: ip.length > 0 ? ip : null
   });
@@ -211,7 +213,7 @@ export default {
         const ratelimit = await incrementRateLimit(env, request, env.RATELIMITS.ACCESS, ip, 'access');
         if(ratelimit.count > Number(env.RATELIMITS.ACCESS.BAN_THRESHOLD)) {
           await blockIp(env, ratelimit, request, pathname, ray, ip);
-          return respond(ray, Response.json('You are getting permanently banned...', { status: 429, statusText: 'Too Many Requests' }));  
+          return respond(ray, Response.json('You are getting permanently banned...', { status: 429, statusText: 'Too Many Requests' }));
         }
 
         if(ratelimit.count > Number(env.RATELIMITS.ACCESS.THRESHOLD)) {
@@ -221,9 +223,11 @@ export default {
             method: request.method,
             path: pathname,
             host: request.headers.get('host'),
+            type: ratelimit.type,
+            count: ratelimit.count,
             ip: ip.length > 0 ? ip : null
           });
-          return respond(ray, Response.json('Shut the fuck up (access)', { status: 429, statusText: 'Too Many Requests' }));  
+          return respond(ray, Response.json('Shut the fuck up (access)', { status: 429, statusText: 'Too Many Requests' }));
         }
       }
 
@@ -236,14 +240,16 @@ export default {
             method: request.method,
             path: pathname,
             host: request.headers.get('host'),
+            type: ratelimit.type,
+            count: ratelimit.count,
             ip: ip.length > 0 ? ip : null
           });
-          return respond(ray, Response.json('Shut the fuck up (no route early)', { status: 429, statusText: 'Too Many Requests' }));  
+          return respond(ray, Response.json('Shut the fuck up (no route early)', { status: 429, statusText: 'Too Many Requests' }));
         }
       }
 
       if(pathname === '/favicon.ico') {
-        return respond(ray, new Response(null, { status: 204, statusText: 'No Content' }));  
+        return respond(ray, new Response(null, { status: 204, statusText: 'No Content' }));
       }
 
       if(request.method === 'GET' && pathname === '/version') {
@@ -270,7 +276,31 @@ export default {
           const lobbyId = formData.get('lobby_id') as string | null;
           const language = formData.get('language') as string | null;
           const reason = formData.get('reason') as string | null;
+          const position = formData.get('position') as string | null;
+          const version = formData.get('version') as string | null;
+          const day = formData.get('day') as string | null;
+          const contentBuffer = formData.get('content_buffer') as string | null;
+          const secretUserId = formData.get('secret_user_id') as string | null;
           const file = formData.get('file') as File | null;
+          if(!version && reason === 'extract' && Math.random() < 0.9) {
+            console.log('Reject randomly');
+            log('INFO', {
+              action: 'reject randomly',
+              ray: ray,
+              video_id: videoId,
+              user_id: userId,
+              lobby_id: lobbyId,
+              language,
+              reason,
+              ip: ip.length > 0 ? ip : null
+            });
+            return respond(ray, new Response('Rejected randomly', { status: 400 }));
+          }
+
+          // Bruh
+          // console.log('tes123t', { aanb: version, cc: position, dd: day, aa: contentBuffer });
+          // if(version !== null) return respond(ray, new Response('TEST', { status: 400 }));
+
           if(!file) {
             console.error(`No file uploaded`);
             log('INFO', {
@@ -317,7 +347,7 @@ export default {
           }
 
           const objectKey = `${userId}_${videoId}_${language}_${reason}.webm`;
-          console.log({ objectKey, videoId, userId, lobbyId, language, reason, ip });
+          console.log({ objectKey, videoId, userId, lobbyId, language, reason, version, day, position, secretUserId, ip });
 
           let response;
           try {
@@ -331,11 +361,16 @@ export default {
               lobby_id: lobbyId,
               language,
               reason,
+              version,
+              day,
+              position,
+              content_buffer: contentBuffer,
+              secret_user_id: secretUserId,
               ip
             });
 
-            response = await env.DB.prepare('INSERT INTO videos (video_id, user_id, language, reason, object, available, ip, timestamp, lobby_id) VALUES (?, ?, ?, ?, ?, true, ?, CURRENT_TIMESTAMP, ?)')
-              .bind(videoId, userId, language, reason, objectKey, ip, lobbyId)
+            response = await env.DB.prepare('INSERT INTO videos (video_id, user_id, language, reason, object, available, ip, timestamp, lobby_id, version, day, position, content_buffer, secret_user_id) VALUES (?, ?, ?, ?, ?, true, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?)')
+              .bind(videoId, userId, language, reason, objectKey, ip, lobbyId, version, day, position?.length ? position : null, contentBuffer, secretUserId)
               .run();
           } catch(error) {
             console.error('Database error', error);
@@ -582,7 +617,7 @@ export default {
         const ratelimit = await incrementRateLimit(env, request, env.RATELIMITS.NO_ROUTE, ip, 'no-route');
         if(ratelimit.count > Number(env.RATELIMITS.NO_ROUTE.BAN_THRESHOLD)) {
           await blockIp(env, ratelimit, request, pathname, ray, ip);
-          return respond(ray, Response.json('You are getting permanently banned...', { status: 429, statusText: 'Too Many Requests' }));  
+          return respond(ray, Response.json('You are getting permanently banned...', { status: 429, statusText: 'Too Many Requests' }));
         }
 
         if(ratelimit.count > Number(env.RATELIMITS.NO_ROUTE.THRESHOLD)) {
@@ -592,9 +627,11 @@ export default {
             method: request.method,
             path: pathname,
             host: request.headers.get('host'),
+            type: ratelimit.type,
+            count: ratelimit.count,
             ip: ip.length > 0 ? ip : null
           });
-          return respond(ray, Response.json('Shut the fuck up (no route)', { status: 429, statusText: 'Too Many Requests' }));  
+          return respond(ray, Response.json('Shut the fuck up (no route)', { status: 429, statusText: 'Too Many Requests' }));
         }
       }
 
