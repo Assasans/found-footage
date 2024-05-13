@@ -6,7 +6,7 @@ compatibility_flags = ["nodejs_compat"]
 [vars]
 SOURCES_URL = ""
 CONTACT_EMAIL = ""
-CLIENT_VERSION = "0.3.1 (0.3.0-compatible; 0.2.2-compatible; 0.2.1-compatible; 0.2.0-compatible; 0.1.0-compatible)"
+CLIENT_VERSION = "0.4.0 (0.3.1-compatible; 0.3.0-compatible; 0.2.2-compatible; 0.2.1-compatible; 0.2.0-compatible; 0.1.0-compatible)"
 R2_SIGNING = { ACCESS_KEY_ID = "", SECRET_ACCESS_KEY = "", CLOUDFLARE_ACCOUNT = "", BUCKET = "" }
 # LOKI = { URL = "", AUTH = "" }
 CLOUDFLARE_AUTH = { EMAIL = "", KEY = "" }
