@@ -4,8 +4,6 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Net;
-using System.Net.Http;
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Text;
@@ -23,6 +21,7 @@ using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Assertions;
 using UnityEngine.Localization.PropertyVariants;
+using UnityEngine.Networking;
 using UnityEngine.UI;
 using Zorro.Core.Serizalization;
 using Object = UnityEngine.Object;
@@ -155,14 +154,14 @@ public class FoundFootagePlugin : BaseUnityPlugin {
     Task.Run(async () => {
       try {
         VersionChecker checker = new VersionChecker();
-        string remote = await checker.GetVersion();
+        string remote = await checker.GetVersion(this);
         if(remote == VersionChecker.IncompatibleVersion) {
           // Try to change to new URL
           if(ServerUrl.Value == "https://foundfootage-server.assasans.dev") {
             ServerUrl.Value = (string)ServerUrl.DefaultValue;
             Logger.LogInfo($"Updated server URL to {ServerUrl.Value}");
 
-            remote = await checker.GetVersion();
+            remote = await checker.GetVersion(this);
           }
         }
 
@@ -195,7 +194,7 @@ public class FoundFootagePlugin : BaseUnityPlugin {
 
     new Thread(() => {
       Logger.LogInfo($"Downloading video {guidString} -> {signedUrl}");
-      byte[] content = VideoCameraPatch.DownloadFakeVideo(signedUrl).GetAwaiter().GetResult();
+      byte[] content = VideoCameraPatch.DownloadFakeVideo(this, signedUrl).GetAwaiter().GetResult();
 
       Logger.LogInfo($"VideoCameraPatch.CreateFakeVideo");
       VideoCameraPatch.CreateFakeVideo(handle, content);
@@ -204,107 +203,98 @@ public class FoundFootagePlugin : BaseUnityPlugin {
 }
 
 public static class HttpUtils {
-  public static void UploadFile(string url, string filePath, Dictionary<String, String> properties) {
-    string boundary = "---------------------------" + DateTime.Now.Ticks.ToString("x");
-    HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
-    request.Method = "PUT";
-    request.ContentType = "multipart/form-data; boundary=" + boundary;
+  private static IEnumerator UploadVideo_Unity(
+    string filePath,
+    Dictionary<string, string> properties,
+    Action<Result<string, Exception>> callback
+  ) {
+    FoundFootagePlugin.Logger.LogInfo($"UploadVideo_Unity start");
 
-    using(Stream requestStream = request.GetRequestStream()) {
-      // Write boundary and file header
-      WriteBoundary(requestStream, boundary);
-      foreach(var (key, value) in properties) {
-        FoundFootagePlugin.Logger.LogInfo($"Property {key}: {value}");
-        WriteFormValue(requestStream, key, value, boundary);
-      }
+    FoundFootagePlugin.Logger.LogInfo($"UploadVideo_Unity ReadAllBytes");
+    var bytes = File.ReadAllBytes(filePath);
 
-      // Write file content
-      WriteFile(requestStream, filePath, boundary);
+    FoundFootagePlugin.Logger.LogInfo($"UploadVideo_Unity IMultipartFormSection");
+    var formData = new List<IMultipartFormSection>();
+    formData.Add(new MultipartFormFileSection("file", bytes, "fullRecording.mp4", "application/octet-stream"));
+    FoundFootagePlugin.Logger.LogInfo($"UploadVideo_Unity MultipartFormFileSection done");
+    foreach(var (key, value) in properties) {
+      var realValue = value;
+      if(value == "") realValue = "null";
 
-      // Write end boundary
-      byte[] endBoundaryBytes = Encoding.ASCII.GetBytes("\r\n--" + boundary + "--\r\n");
-      requestStream.Write(endBoundaryBytes, 0, endBoundaryBytes.Length);
+      FoundFootagePlugin.Logger.LogInfo($"UploadVideo_Unity MultipartFormDataSection {key}: {realValue}");
+      formData.Add(new MultipartFormDataSection(key, realValue));
     }
 
+    FoundFootagePlugin.Logger.LogInfo($"UploadVideo_Unity GenerateBoundary");
+    byte[] boundary = UnityWebRequest.GenerateBoundary();
+    FoundFootagePlugin.Logger.LogInfo($"UploadVideo_Unity SerializeFormSections");
+    byte[] formSections = UnityWebRequest.SerializeFormSections(formData, boundary);
+
+    FoundFootagePlugin.Logger.LogInfo($"UploadVideo_Unity Put");
+    using UnityWebRequest request = UnityWebRequest.Put(
+      $"{FoundFootagePlugin.Instance.ServerUrl.Value}/videos?local={PluginInfo.PLUGIN_VERSION}",
+      formSections
+    );
+    request.SetRequestHeader("Content-Type", $"multipart/form-data; boundary=\"{Encoding.UTF8.GetString(boundary)}\"");
+
+    FoundFootagePlugin.Logger.LogInfo($"UploadVideo_Unity waiting for response...");
+    yield return request.SendWebRequest();
+    FoundFootagePlugin.Logger.LogInfo($"UploadVideo_Unity got response");
+
+    if(request.result != UnityWebRequest.Result.Success) {
+      // What the fuck should I return?
+      callback(Result<string, Exception>.NewError(new Exception(
+        $"request.GetError={request.GetError()} request.error={request.error} downloadHandler.GetErrorMsg={request.downloadHandler.GetErrorMsg()} downloadHandler.error={request.downloadHandler.error}"
+      )));
+    } else {
+      callback(Result<string, Exception>.NewOk(request.downloadHandler.text));
+    }
+  }
+
+  public static async Task UploadVideo(MonoBehaviour target, string filePath, Dictionary<string, string> properties) {
     try {
-      using WebResponse response = request.GetResponse();
-      using Stream responseStream = response.GetResponseStream();
-      using StreamReader reader = new StreamReader(responseStream);
-      string responseText = reader.ReadToEnd();
-      FoundFootagePlugin.Logger.LogInfo(responseText);
-    } catch(WebException exception) {
-      FoundFootagePlugin.Logger.LogError($"Error: {exception}");
-    }
-  }
-
-  public static void WriteBoundary(Stream requestStream, string boundary) {
-    byte[] boundaryBytes = Encoding.ASCII.GetBytes("\r\n--" + boundary + "\r\n");
-    requestStream.Write(boundaryBytes, 0, boundaryBytes.Length);
-  }
-
-  public static void WriteFormValue(Stream requestStream, string fieldName, string value, string boundary) {
-    string formItemTemplate = "Content-Disposition: form-data; name=\"{0}\"\r\n\r\n{1}";
-    string formItem = string.Format(formItemTemplate, fieldName, value);
-    byte[] formItemBytes = Encoding.UTF8.GetBytes(formItem);
-    requestStream.Write(formItemBytes, 0, formItemBytes.Length);
-    WriteBoundary(requestStream, boundary);
-  }
-
-  public static void WriteFile(Stream requestStream, string filePath, string boundary) {
-    using(FileStream fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read)) {
-      string headerTemplate =
-        "Content-Disposition: form-data; name=\"file\"; filename=\"{0}\"\r\nContent-Type: application/octet-stream\r\n\r\n";
-      string header = string.Format(headerTemplate, Path.GetFileName(filePath));
-      byte[] headerBytes = Encoding.UTF8.GetBytes(header);
-      requestStream.Write(headerBytes, 0, headerBytes.Length);
-
-      byte[] buffer = new byte[1024 * 1024]; // 1MB buffer
-      int bytesRead;
-      while((bytesRead = fileStream.Read(buffer, 0, buffer.Length)) != 0) {
-        requestStream.Write(buffer, 0, bytesRead);
-      }
+      FoundFootagePlugin.Logger.LogInfo($"UploadVideo start");
+      var response =
+        await UnityShit.CoroutineToTask<string>(target, callback => UploadVideo_Unity(filePath, properties, callback));
+      FoundFootagePlugin.Logger.LogInfo($"Upload success: {response}");
+    } catch(Exception exception) {
+      FoundFootagePlugin.Logger.LogError($"An error occurred while uploading video: {exception}");
+      throw;
     }
   }
 }
 
-// [HarmonyPatch(typeof(SurfaceNetworkHandler))]
-// internal static class SurfaceNetworkHandlerPatch {
-//   [HarmonyPrefix]
-//   [HarmonyPatch("ReturningFromLostWorld", MethodType.Getter)]
-//   internal static bool ReturningFromLostWorld(ref bool __result) {
-//     // FoundFootagePlugin.Logger.LogError("ReturningFromLostWorld!");
-//     __result = true;
-//     return false;
-//   }
-//
-//   [HarmonyPostfix]
-//   [HarmonyPatch("InitSurface")]
-//   internal static void SpawnOnStartRun() {
-//     SpawnExtraCamera();
-//   }
-//
-//   private static void SpawnExtraCamera() {
-//     FoundFootagePlugin.Logger.LogInfo("Spawning extra camera!");
-//
-//     ItemInstanceData instance = new ItemInstanceData(Guid.NewGuid());
-//     VideoInfoEntry entry = new VideoInfoEntry();
-//     entry.videoID = new VideoHandle(GuidUtils.MakeLocal(Guid.NewGuid()));
-//     entry.maxTime = 1;
-//     entry.timeLeft = 0;
-//     entry.SetDirty();
-//     instance.AddDataEntry(entry);
-//     FoundFootagePlugin.Instance.FakeVideos.Add(entry.videoID);
-//     FoundFootagePlugin.Logger.LogInfo($"added entry {entry.videoID.id}");
-//     Pickup pickup = PickupHandler.CreatePickup(1, instance, new Vector3(-14.842f, 2.418f, 8.776f),
-//       Quaternion.Euler(0f, -67.18f, 0f));
-//     FoundFootagePlugin.Logger.LogInfo("Spawned extra camera!");
-//
-//     if(CameraHandler.TryGetCamera(instance.m_guid, out VideoCamera camera)) {
-//     } else {
-//       FoundFootagePlugin.Logger.LogError("No VideoCamera found");
-//     }
-//   }
-// }
+[HarmonyPatch(typeof(SurfaceNetworkHandler))]
+internal static class SurfaceNetworkHandlerPatch {
+  [HarmonyPostfix]
+  [HarmonyPatch("InitSurface")]
+  internal static void SpawnOnStartRun() {
+    TimeOfDayHandler.SetTimeOfDay(TimeOfDay.Evening);
+    SpawnExtraCamera();
+  }
+
+  private static void SpawnExtraCamera() {
+    FoundFootagePlugin.Logger.LogInfo("Spawning extra camera!");
+
+    ItemInstanceData instance = new ItemInstanceData(Guid.NewGuid());
+    VideoInfoEntry entry = new VideoInfoEntry();
+    entry.videoID = new VideoHandle(GuidUtils.MakeLocal(Guid.NewGuid()));
+    entry.maxTime = 1;
+    entry.timeLeft = 0;
+    entry.SetDirty();
+    instance.AddDataEntry(entry);
+    FoundFootagePlugin.Instance.FakeVideos.Add(entry.videoID);
+    FoundFootagePlugin.Logger.LogInfo($"added entry {entry.videoID.id}");
+    Pickup pickup = PickupHandler.CreatePickup(1, instance, new Vector3(-14.842f, 2.418f, 8.776f),
+      Quaternion.Euler(0f, -67.18f, 0f));
+    FoundFootagePlugin.Logger.LogInfo("Spawned extra camera!");
+
+    if(CameraHandler.TryGetCamera(instance.m_guid, out VideoCamera camera)) {
+    } else {
+      FoundFootagePlugin.Logger.LogError("No VideoCamera found");
+    }
+  }
+}
 
 public static class GuidUtils {
   public static Guid MakeLocal(Guid guid) {
@@ -387,7 +377,8 @@ internal static class VideoCameraPatch {
 
       FoundFootagePlugin.Logger.LogInfo("CreateFakeVideo start");
       new Thread(() => {
-        (string signedUrl, string? serverVideoId) = DownloadFakeVideoSignedUrl().GetAwaiter().GetResult();
+        (string signedUrl, string? serverVideoId) = DownloadFakeVideoSignedUrl(__instance).GetAwaiter().GetResult();
+        FoundFootagePlugin.Logger.LogInfo($"Signed URL got successfully (video ID: {serverVideoId}): {signedUrl}");
         FoundFootagePlugin.Logger.LogInfo("Sending signed URL over Mycelium...");
         MyceliumNetwork.RPC(
           FoundFootagePlugin.ModId,
@@ -408,40 +399,50 @@ internal static class VideoCameraPatch {
     }
   }
 
-  public static async Task<(string, string?)> DownloadFakeVideoSignedUrl() {
-    using var httpClient = new HttpClient();
+  private static IEnumerator DownloadFakeVideoSignedUrl_Unity(Action<Result<(string, string), Exception>> callback) {
+    using UnityWebRequest request =
+      UnityWebRequest.Get(
+        $"{FoundFootagePlugin.Instance.ServerUrl.Value}/video/signed?local={PluginInfo.PLUGIN_VERSION}");
+    yield return request.SendWebRequest();
+    if(request.result != UnityWebRequest.Result.Success) {
+      // What the fuck should I return?
+      callback(Result<(string, string), Exception>.NewError(new Exception(
+        $"request.GetError={request.GetError()} request.error={request.error} downloadHandler.GetErrorMsg={request.downloadHandler.GetErrorMsg()} downloadHandler.error={request.downloadHandler.error}"
+      )));
+    } else {
+      var signedUrl = request.downloadHandler.text;
+      var videoId = request.GetResponseHeader("X-Video-Id");
+
+      callback(Result<(string, string), Exception>.NewOk((signedUrl, videoId)));
+    }
+  }
+
+  public static async Task<(string, string)> DownloadFakeVideoSignedUrl(MonoBehaviour target) {
     try {
-      using var response = await httpClient.GetAsync(
-        $"{FoundFootagePlugin.Instance.ServerUrl.Value}/video/signed",
-        HttpCompletionOption.ResponseHeadersRead
-      );
-      response.EnsureSuccessStatusCode();
-      var signedUrl = await response.Content.ReadAsStringAsync();
-
-      string? videoId = null;
-      if(response.Headers.TryGetValues("X-Video-Id", out var values)) {
-        videoId = values.Single();
-      }
-
-      FoundFootagePlugin.Logger.LogInfo($"Signed URL got successfully (video ID: {videoId}): {signedUrl}");
-      return (signedUrl, videoId);
-    } catch(HttpRequestException exception) {
+      return await UnityShit.CoroutineToTask<(string, string)>(target, DownloadFakeVideoSignedUrl_Unity);
+    } catch(Exception exception) {
       FoundFootagePlugin.Logger.LogError($"An error occurred while getting signed URL: {exception}");
       throw;
     }
   }
 
-  public static async Task<byte[]> DownloadFakeVideo(string signedUrl) {
-    using var httpClient = new HttpClient();
-    try {
-      using var response = await httpClient.GetAsync(signedUrl, HttpCompletionOption.ResponseHeadersRead);
-      response.EnsureSuccessStatusCode();
+  private static IEnumerator DownloadFakeVideo_Unity(string signedUrl, Action<Result<byte[], Exception>> callback) {
+    using UnityWebRequest request = UnityWebRequest.Get(signedUrl);
+    yield return request.SendWebRequest();
+    if(request.result != UnityWebRequest.Result.Success) {
+      // What the fuck should I return?
+      callback(Result<byte[], Exception>.NewError(new Exception(
+        $"request.GetError={request.GetError()} request.error={request.error} downloadHandler.GetErrorMsg={request.downloadHandler.GetErrorMsg()} downloadHandler.error={request.downloadHandler.error}"
+      )));
+    } else {
+      callback(Result<byte[], Exception>.NewOk(request.downloadHandler.data.ToArray()));
+    }
+  }
 
-      using var stream = new MemoryStream();
-      await response.Content.CopyToAsync(stream);
-      FoundFootagePlugin.Logger.LogInfo("File downloaded successfully.");
-      return stream.ToArray();
-    } catch(HttpRequestException exception) {
+  public static async Task<byte[]> DownloadFakeVideo(MonoBehaviour target, string signedUrl) {
+    try {
+      return await UnityShit.CoroutineToTask<byte[]>(target, callback => DownloadFakeVideo_Unity(signedUrl, callback));
+    } catch(Exception exception) {
       FoundFootagePlugin.Logger.LogError($"An error occurred while downloading the file: {exception}");
       throw;
     }
@@ -483,19 +484,57 @@ internal static class VideoCameraPatch {
   }
 }
 
+public class Result<T, E> {
+  public T? Ok { get; set; }
+  public E? Error { get; set; }
+
+  private Result(T? ok, E? error) {
+    Ok = ok;
+    Error = error;
+  }
+
+  public static Result<T, E> NewOk(T value) => new(value, default);
+  public static Result<T, E> NewError(E value) => new(default, value);
+}
+
+public static class UnityShit {
+  // Unity SUCKS, I do not want to use fucking coroutine API, it is not C# 4 anymore
+  public static Task<T> CoroutineToTask<T>(
+    MonoBehaviour target,
+    Func<Action<Result<T, Exception>>, IEnumerator> block
+  ) {
+    var source = new TaskCompletionSource<T>();
+    target.StartCoroutine(block(result => {
+      if(result.Ok != null) source.SetResult(result.Ok);
+      else if(result.Error != null) source.SetException(result.Error);
+    }));
+
+    return source.Task;
+  }
+}
+
 public class VersionChecker {
   public static readonly string IncompatibleVersion = "0.0.0 (incompatible)";
 
-  public async Task<string> GetVersion() {
-    using var httpClient = new HttpClient();
+  private IEnumerator GetVersion_Unity(Action<Result<string, Exception>> callback) {
+    using UnityWebRequest request =
+      UnityWebRequest.Get($"{FoundFootagePlugin.Instance.ServerUrl.Value}/version?local={PluginInfo.PLUGIN_VERSION}");
+    yield return request.SendWebRequest();
+    if(request.result != UnityWebRequest.Result.Success) {
+      // What the fuck should I return?
+      callback(Result<string, Exception>.NewError(new Exception(
+        $"request.GetError={request.GetError()} request.error={request.error} downloadHandler.GetErrorMsg={request.downloadHandler.GetErrorMsg()} downloadHandler.error={request.downloadHandler.error}"
+      )));
+    } else {
+      callback(Result<string, Exception>.NewOk(request.downloadHandler.text));
+    }
+  }
+
+  public async Task<string> GetVersion(MonoBehaviour target) {
     try {
-      using var response = await httpClient.GetAsync(
-        $"{FoundFootagePlugin.Instance.ServerUrl.Value}/version?local={PluginInfo.PLUGIN_VERSION}",
-        HttpCompletionOption.ResponseHeadersRead);
-      response.EnsureSuccessStatusCode();
-      return await response.Content.ReadAsStringAsync();
-    } catch(HttpRequestException exception) {
-      FoundFootagePlugin.Logger.LogError($"An error occurred while fetching version: {exception}");
+      return await UnityShit.CoroutineToTask<string>(target, GetVersion_Unity);
+    } catch(Exception exception) {
+      FoundFootagePlugin.Logger.LogError($"An error occurred while fetching version: {exception.Message}");
       return IncompatibleVersion;
     }
   }
@@ -544,7 +583,7 @@ internal static class VerboseDebugPatch {
 internal static class ExtractVideoMachinePatch {
   [HarmonyPostfix]
   [HarmonyPatch("RPC_Success")]
-  internal static void RPC_Success() {
+  internal static void RPC_Success(ExtractVideoMachine __instance) {
     FoundFootagePlugin.Logger.LogInfo("RPC_Success shitted");
     if(!PhotonNetwork.IsMasterClient) return;
 
@@ -557,8 +596,8 @@ internal static class ExtractVideoMachinePatch {
       FoundFootagePlugin.Logger.LogInfo($"Check {videoID}");
       if(GuidUtils.IsLocal(videoID.id)) continue;
 
-      if(FoundFootagePlugin.Instance.Random.NextDouble() <= chance) {
-        PhotonGameLobbyHandlerPatch.UploadRecording(videoID, recording, "extract", null);
+      if(true || FoundFootagePlugin.Instance.Random.NextDouble() <= chance) {
+        PhotonGameLobbyHandlerPatch.UploadRecording(FoundFootagePlugin.Instance, videoID, recording, "extract", null);
       } else {
         FoundFootagePlugin.Logger.LogInfo("Do not uploading extracted");
       }
@@ -635,7 +674,7 @@ internal static class PhotonGameLobbyHandlerPatch {
             var position = camera != null
               ? camera.transform != null ? camera.transform.position : (Vector3?)null
               : null;
-            UploadRecording(videoID, recording, "death", position);
+            UploadRecording(FoundFootagePlugin.Instance, videoID, recording, "death", position);
           } else {
             FoundFootagePlugin.Logger.LogInfo("Do not extracting");
           }
@@ -646,7 +685,8 @@ internal static class PhotonGameLobbyHandlerPatch {
     }
   }
 
-  public static void UploadRecording(VideoHandle videoID, CameraRecording recording, string reason, Vector3? position) {
+  public static void UploadRecording(MonoBehaviour target, VideoHandle videoID, CameraRecording recording,
+    string reason, Vector3? position) {
     // I have no idea why it is being called multiple times, both for deaths and extracts.
     if(FoundFootagePlugin.Instance.SentVideos.Contains(videoID)) {
       FoundFootagePlugin.Logger.LogWarning($"Not uploading duplicate video {videoID}");
@@ -677,8 +717,8 @@ internal static class PhotonGameLobbyHandlerPatch {
           for(int attempt = 0; attempt < 10; attempt++) {
             try {
               FoundFootagePlugin.Logger.LogInfo($"Content buffer: {contentBuffer?.Length ?? 0} bytes");
-              HttpUtils.UploadFile(
-                $"{FoundFootagePlugin.Instance.ServerUrl.Value}/videos?local={PluginInfo.PLUGIN_VERSION}",
+              HttpUtils.UploadVideo(
+                target,
                 path,
                 new Dictionary<string, string> {
                   ["video_id"] = recording.videoHandle.id.ToString(),
@@ -694,7 +734,7 @@ internal static class PhotonGameLobbyHandlerPatch {
                   // multipart/form-data is cursed, and FCL is even more cursed, so the easiest way is to just Base64 encode...
                   ["content_buffer"] = contentBuffer != null ? Convert.ToBase64String(contentBuffer) : ""
                 }
-              );
+              ).GetAwaiter().GetResult();
               FoundFootagePlugin.Logger.LogInfo("Uploaded video!");
 
               break;

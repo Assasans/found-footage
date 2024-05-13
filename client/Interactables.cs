@@ -1,9 +1,13 @@
 using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 using Photon.Pun;
+using UnityEngine;
+using UnityEngine.Networking;
 
 namespace FoundFootage;
 
@@ -35,7 +39,7 @@ public class LikeInteractable : Interactable {
       FoundFootagePlugin.Logger.LogInfo($"Sending vote for {videoId}...");
 
       try {
-        VoteUtils.SendVote(videoId, VoteType.Like).GetAwaiter().GetResult();
+        VoteUtils.SendVote(this, videoId, VoteType.Like).GetAwaiter().GetResult();
         HelmetText.Instance.SetHelmetText("Thank you for voting", 3);
       } catch(WebException) {
         HelmetText.Instance.SetHelmetText("You have already voted", 3);
@@ -76,7 +80,7 @@ public class DislikeInteractable : Interactable {
       FoundFootagePlugin.Logger.LogInfo($"Sending vote for {videoId}...");
 
       try {
-        VoteUtils.SendVote(videoId, VoteType.Dislike).GetAwaiter().GetResult();
+        VoteUtils.SendVote(this, videoId, VoteType.Dislike).GetAwaiter().GetResult();
         HelmetText.Instance.SetHelmetText("Thank you for voting", 3);
       } catch(WebException) {
         HelmetText.Instance.SetHelmetText("You have already voted", 3);
@@ -96,36 +100,44 @@ public enum VoteType {
 }
 
 public static class VoteUtils {
-  public static async Task SendVote(string videoId, VoteType type) {
-    string boundary = "---------------------------" + DateTime.Now.Ticks.ToString("x");
-    HttpWebRequest request =
-      (HttpWebRequest)WebRequest.Create($"{FoundFootagePlugin.Instance.ServerUrl.Value}/video/vote");
-    request.Method = "POST";
-    request.ContentType = "multipart/form-data; boundary=" + boundary;
+  private static IEnumerator SendVote_Unity(
+    string videoId,
+    VoteType type,
+    Action<Result<string, Exception>> callback
+  ) {
+    var formData = new List<IMultipartFormSection>();
+    formData.Add(new MultipartFormDataSection("video_id", videoId));
+    formData.Add(new MultipartFormDataSection("user_id", FoundFootagePlugin.Instance.UserId.Value));
+    formData.Add(new MultipartFormDataSection("lobby_id", PhotonNetwork.CurrentRoom.Name));
+    formData.Add(new MultipartFormDataSection("vote_type", type switch {
+      VoteType.Like => "like",
+      VoteType.Dislike => "dislike",
+      _ => throw new ArgumentOutOfRangeException(nameof(type), type, null)
+    }));
 
-    using(Stream requestStream = request.GetRequestStream()) {
-      // Write boundary and file header
-      HttpUtils.WriteBoundary(requestStream, boundary);
-      HttpUtils.WriteFormValue(requestStream, "video_id", videoId, boundary);
-      HttpUtils.WriteFormValue(requestStream, "user_id", FoundFootagePlugin.Instance.UserId.Value, boundary);
-      HttpUtils.WriteFormValue(requestStream, "lobby_id", PhotonNetwork.CurrentRoom.Name, boundary);
-      HttpUtils.WriteFormValue(requestStream, "vote_type", type switch {
-        VoteType.Like => "like",
-        VoteType.Dislike => "dislike",
-        _ => throw new ArgumentOutOfRangeException(nameof(type), type, null)
-      }, boundary + "--");
+    byte[] boundary = UnityWebRequest.GenerateBoundary();
+    using UnityWebRequest request = UnityWebRequest.Post(
+      $"{FoundFootagePlugin.Instance.ServerUrl.Value}/video/vote?local={PluginInfo.PLUGIN_VERSION}",
+      formData,
+      boundary
+    );
+
+    yield return request.SendWebRequest();
+    if(request.result != UnityWebRequest.Result.Success) {
+      // What the fuck should I return?
+      callback(Result<string, Exception>.NewError(new Exception(
+        $"request.GetError={request.GetError()} request.error={request.error} downloadHandler.GetErrorMsg={request.downloadHandler.GetErrorMsg()} downloadHandler.error={request.downloadHandler.error}"
+      )));
+    } else {
+      callback(Result<string, Exception>.NewOk(request.downloadHandler.text));
     }
+  }
 
+  public static async Task SendVote(MonoBehaviour target, string videoId, VoteType type) {
     try {
-      // Fuck FCL
-      using HttpWebResponse response = (HttpWebResponse)request.GetResponse();
-
-      await using Stream responseStream = response.GetResponseStream();
-      using StreamReader reader = new StreamReader(responseStream);
-      string responseText = await reader.ReadToEndAsync();
-
-      FoundFootagePlugin.Logger.LogInfo($"Vote sent successfully: {responseText}");
-    } catch(WebException exception) {
+      var response = await UnityShit.CoroutineToTask<string>(target, callback => SendVote_Unity(videoId, type, callback));
+      FoundFootagePlugin.Logger.LogInfo($"Vote sent successfully: {response}");
+    } catch(Exception exception) {
       FoundFootagePlugin.Logger.LogError($"An error occurred while sending vote: {exception}");
       throw;
     }

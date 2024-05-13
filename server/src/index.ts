@@ -276,27 +276,27 @@ export default {
           const lobbyId = formData.get('lobby_id') as string | null;
           const language = formData.get('language') as string | null;
           const reason = formData.get('reason') as string | null;
-          const position = formData.get('position') as string | null;
+          let position = formData.get('position') as string | null;
           const version = formData.get('version') as string | null;
           const day = formData.get('day') as string | null;
           const contentBuffer = formData.get('content_buffer') as string | null;
           const playerCount = formData.get('player_count') as string | null;
           const secretUserId = formData.get('secret_user_id') as string | null;
           const file = formData.get('file') as File | null;
-          // if(!version && reason === 'extract' && Math.random() < 0.9) {
-          //   console.log('Reject randomly');
-          //   log('INFO', {
-          //     action: 'reject randomly',
-          //     ray: ray,
-          //     video_id: videoId,
-          //     user_id: userId,
-          //     lobby_id: lobbyId,
-          //     language,
-          //     reason,
-          //     ip: ip.length > 0 ? ip : null
-          //   });
-          //   return respond(ray, new Response('Rejected randomly', { status: 400 }));
-          // }
+          if(!version && reason === 'extract' && Math.random() < 0.9) {
+            console.log('Reject randomly');
+            log('INFO', {
+              action: 'reject randomly',
+              ray: ray,
+              video_id: videoId,
+              user_id: userId,
+              lobby_id: lobbyId,
+              language,
+              reason,
+              ip: ip.length > 0 ? ip : null
+            });
+            return respond(ray, new Response('Rejected randomly', { status: 400 }));
+          }
 
           // Bruh
           // console.log('tes123t', { aanb: version, cc: position, dd: day, aa: contentBuffer });
@@ -313,6 +313,8 @@ export default {
             });
             return respond(ray, new Response('An error occurred during processing - no file', { status: 400 }))
           }
+
+          if(!position || position.length < 1 || position === 'null') position = null;
 
           console.log('Video UUID:', videoId);
           console.log('File Name:', file.name);
