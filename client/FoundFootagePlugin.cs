@@ -126,7 +126,7 @@ public class FoundFootagePlugin : BaseUnityPlugin {
 
     if(ConfigVersion.Value < 2) {
       ConfigVersion.Value = 2;
-      if(Math.Abs(PassUploadChance.Value - 1f) < 0.01) {
+      if(PassUploadChance.Value.AlmostEquals(1f, 0.01f)) {
         PassUploadChance.Value = (float)PassUploadChance.DefaultValue;
         Logger.LogInfo($"Set PassUploadChance to {PassUploadChance.Value}");
       }
@@ -548,12 +548,16 @@ internal static class ExtractVideoMachinePatch {
     FoundFootagePlugin.Logger.LogInfo("RPC_Success shitted");
     if(!PhotonNetwork.IsMasterClient) return;
 
+    var chance = FoundFootagePlugin.Instance.PassUploadChance.Value;
+    // Too bad
+    if(chance.AlmostEquals(0f, 0.01f)) return;
+
     var recordings = RecordingsHandler.GetRecordings();
     foreach(var (videoID, recording) in recordings) {
       FoundFootagePlugin.Logger.LogInfo($"Check {videoID}");
       if(GuidUtils.IsLocal(videoID.id)) continue;
 
-      if(FoundFootagePlugin.Instance.Random.NextDouble() <= FoundFootagePlugin.Instance.PassUploadChance.Value) {
+      if(FoundFootagePlugin.Instance.Random.NextDouble() <= chance) {
         PhotonGameLobbyHandlerPatch.UploadRecording(videoID, recording, "extract", null);
       } else {
         FoundFootagePlugin.Logger.LogInfo("Do not uploading extracted");
@@ -608,6 +612,10 @@ internal static class PhotonGameLobbyHandlerPatch {
     if(Object.FindObjectsOfType<Player>().Where(pl => !pl.ai).All(player => player.data.dead)) {
       FoundFootagePlugin.Logger.LogInfo("CheckForAllDead true");
 
+      var chance = FoundFootagePlugin.Instance.DeathUploadChance.Value;
+      // Too bad
+      if(chance.AlmostEquals(0f, 0.01f)) return;
+
       __instance.StartCoroutine(WaitThen(5f, () => {
         var recordings = RecordingsHandler.GetRecordings();
         var cameras = (Dictionary<Guid, VideoCamera>)AccessTools.DeclaredField(typeof(CameraHandler), "m_cameras")
@@ -616,7 +624,7 @@ internal static class PhotonGameLobbyHandlerPatch {
           FoundFootagePlugin.Logger.LogInfo($"Check {videoID}");
           if(GuidUtils.IsLocal(videoID.id)) continue;
 
-          if(FoundFootagePlugin.Instance.Random.NextDouble() <= FoundFootagePlugin.Instance.DeathUploadChance.Value) {
+          if(FoundFootagePlugin.Instance.Random.NextDouble() <= chance) {
             var camera = cameras.Values.SingleOrDefault(camera => {
               var entry = (VideoInfoEntry)AccessTools.DeclaredField(typeof(VideoCamera), "m_recorderInfoEntry")
                 .GetValue(camera);
