@@ -44,6 +44,8 @@ public class FoundFootagePlugin : BaseUnityPlugin {
   internal List<VideoHandle> SentVideos { get; private set; }
   internal List<VideoHandle> SentVotes { get; private set; }
   internal Dictionary<VideoHandle, string> ClientToServerId { get; private set; }
+  internal Dictionary<VideoHandle, ContentBuffer> FakeContentBuffers { get; private set; }
+  internal MainThreadDispatcher Dispatcher { get; private set; }
 
   internal ConfigFile PersistentConfig { get; private set; }
 
@@ -56,10 +58,12 @@ public class FoundFootagePlugin : BaseUnityPlugin {
   internal ConfigEntry<bool>? VotingEnabled { get; private set; }
   internal ConfigEntry<bool>? SendPositionEnabled { get; private set; }
   internal ConfigEntry<bool>? SendContentBufferEnabled { get; private set; }
+  internal ConfigEntry<float>? FoundVideoScoreMultiplier { get; private set; }
 
   internal ConfigEntry<float>? SpawnChance { get; private set; }
   internal ConfigEntry<float>? DeathUploadChance { get; private set; }
   internal ConfigEntry<float>? PassUploadChance { get; private set; }
+  internal ConfigEntry<float>? DeathVideoChance { get; private set; }
 
   private void Awake() {
     Instance = this;
@@ -71,6 +75,7 @@ public class FoundFootagePlugin : BaseUnityPlugin {
     SentVideos = new List<VideoHandle>();
     SentVotes = new List<VideoHandle>();
     ClientToServerId = new Dictionary<VideoHandle, string>();
+    FakeContentBuffers = new Dictionary<VideoHandle, ContentBuffer>();
 
     BepInPlugin metadata = MetadataHelper.GetMetadata(this);
     Assert.IsNotNull(metadata); // Unreachable, checked in base class constructor
@@ -107,6 +112,8 @@ public class FoundFootagePlugin : BaseUnityPlugin {
       "Send camera position on death to spawn camera at same position for other teams.");
     SendContentBufferEnabled = Config.Bind("Voting", "SendContentBufferEnabled", true,
       "Send recording content buffer (scoring data) to allow your videos to give views when viewed by other teams.");
+    FoundVideoScoreMultiplier = Config.Bind("Voting", "FoundVideoScoreMultiplier", 0.5f,
+      "Controls how much of the original video score you receive. (1 - original score, 0 to disable views for fake videos).");
 
     SpawnChance = Config.Bind("Chances", "SpawnChance", 0.3f,
       "Chance that another team's camera will be spawned (0 to disable).");
@@ -114,6 +121,8 @@ public class FoundFootagePlugin : BaseUnityPlugin {
       "Chance that the camera video will be uploaded when all team members die (1 - always, 0 to disable).");
     PassUploadChance = Config.Bind("Chances", "PassUploadChance", 0.25f,
       "Chance that the camera video will be uploaded when the team returns to surface (1 - always, 0 to disable).");
+    DeathVideoChance = Config.Bind("Chances", "DeathVideoChance", 0.75f,
+      "Chance that the found camera will contain video of a dead team, instead of a survived one (1 - always, 0 - never).");
 
     // Plugin startup logic
     Logger.LogInfo($"Plugin {PluginInfo.PLUGIN_GUID} is loaded!");
@@ -181,25 +190,88 @@ public class FoundFootagePlugin : BaseUnityPlugin {
         throw;
       }
     });
+
+    Dispatcher = gameObject.AddComponent<MainThreadDispatcher>();
+  }
+
+  private ContentBuffer CreateContentBufferForgiving(BinaryDeserializer deserializer) {
+    int num = deserializer.ReadInt();
+    List<ContentBuffer.BufferedContent> bufferedContentList = new List<ContentBuffer.BufferedContent>();
+    for(int index = 0; index < num; ++index) {
+      try {
+        ContentBuffer.BufferedContent bufferedContent = new ContentBuffer.BufferedContent();
+        bufferedContent.Deserialize(deserializer);
+        bufferedContentList.Add(bufferedContent);
+      } catch(Exception exception) {
+        Logger.LogError($"Failed to read BufferedContent {index}: {exception}");
+      }
+    }
+
+    return new ContentBuffer {
+      buffer = bufferedContentList
+    };
+  }
+
+  private void CreateFakeContentBuffer(VideoHandle handle, GetSignedVideoResponse response) {
+    try {
+      Logger.LogInfo("CreateFakeContentBuffer!");
+      if(response.contentBuffer != null) {
+        Logger.LogInfo("Saving remote content buffer...");
+        Logger.LogInfo($"{response.contentBuffer}");
+        var bufferBytes = Convert.FromBase64String(response.contentBuffer);
+        Logger.LogInfo($"{bufferBytes.Length} bytes");
+        using BinaryDeserializer deserializer = new BinaryDeserializer(bufferBytes, Allocator.Temp);
+        Logger.LogInfo($"CreateContentBufferForgiving(deserializer)");
+        var buffer = CreateContentBufferForgiving(deserializer);
+
+        Logger.LogInfo($"Multiply score by {FoundVideoScoreMultiplier.Value}");
+        foreach(var bufferedContent in buffer.buffer) {
+          bufferedContent.score *= FoundVideoScoreMultiplier.Value;
+        }
+
+        FakeContentBuffers.Add(handle, buffer);
+      }
+    } catch(Exception exception) {
+      Logger.LogError($"CreateFakeContentBuffer: {exception}");
+    }
   }
 
   [CustomRPC]
-  public void CreateFakeVideo(string guidString, string signedUrl, string? serverVideoId = null) {
+  public void CreateFakeVideo(string guidString, string responseJson) {
     Logger.LogInfo("CreateFakeVideo!");
     VideoHandle handle = new VideoHandle(Guid.Parse(guidString));
 
-    if(serverVideoId != null) {
-      ClientToServerId.Add(handle, serverVideoId);
+    var response = JsonUtility.FromJson<GetSignedVideoResponse>(responseJson);
+    ClientToServerId.Add(handle, response.videoId);
+
+    if(!FoundVideoScoreMultiplier.Value.AlmostEquals(0f, 0.01f)) {
+      Dispatcher.Dispatch(() => CreateFakeContentBuffer(handle, response));
+    } else {
+      Logger.LogInfo("Remote content buffer is disabled in config");
     }
 
     new Thread(() => {
-      Logger.LogInfo($"Downloading video {guidString} -> {signedUrl}");
-      byte[] content = VideoCameraPatch.DownloadFakeVideo(this, signedUrl).GetAwaiter().GetResult();
+      Logger.LogInfo($"Downloading video {guidString} -> {response.url}");
+      byte[] content = VideoCameraPatch.DownloadFakeVideo(this, response.url).GetAwaiter().GetResult();
 
       Logger.LogInfo($"VideoCameraPatch.CreateFakeVideo");
       VideoCameraPatch.CreateFakeVideo(handle, content);
     }).Start();
   }
+}
+
+public class GetSignedVideoRequest {
+  public int? day;
+  public int? playerCount;
+  public string? reason;
+  public string? language;
+}
+
+public class GetSignedVideoResponse {
+  public string url;
+  public string videoId;
+  public string? position;
+  public string? contentBuffer;
 }
 
 public static class HttpUtils {
@@ -376,17 +448,24 @@ internal static class VideoCameraPatch {
       FoundFootagePlugin.Instance.ProcessedFakeVideos.Add(entry.videoID);
 
       FoundFootagePlugin.Logger.LogInfo("CreateFakeVideo start");
+      var requestParams = new GetSignedVideoRequest {
+        day = SurfaceNetworkHandler.RoomStats.CurrentDay,
+        playerCount = Object.FindObjectsOfType<Player>().Count(pl => !pl.ai),
+        reason = new Random().NextDouble() < FoundFootagePlugin.Instance.DeathVideoChance.Value ? "death" : "extract",
+        language = CultureInfo.InstalledUICulture.TwoLetterISOLanguageName
+      };
       new Thread(() => {
-        (string signedUrl, string? serverVideoId) = DownloadFakeVideoSignedUrl(__instance).GetAwaiter().GetResult();
-        FoundFootagePlugin.Logger.LogInfo($"Signed URL got successfully (video ID: {serverVideoId}): {signedUrl}");
+        GetSignedVideoResponse response = DownloadFakeVideoSignedUrl(FoundFootagePlugin.Instance, requestParams)
+          .GetAwaiter().GetResult();
+        FoundFootagePlugin.Logger.LogInfo(
+          $"Signed URL got successfully (video ID: {response.videoId}): {response.url}");
         FoundFootagePlugin.Logger.LogInfo("Sending signed URL over Mycelium...");
         MyceliumNetwork.RPC(
           FoundFootagePlugin.ModId,
           nameof(FoundFootagePlugin.CreateFakeVideo),
           ReliableType.Reliable,
           entry.videoID.id.ToString(),
-          signedUrl,
-          serverVideoId
+          JsonUtility.ToJson(response)
         );
       }).Start();
 
@@ -399,27 +478,33 @@ internal static class VideoCameraPatch {
     }
   }
 
-  private static IEnumerator DownloadFakeVideoSignedUrl_Unity(Action<Result<(string, string), Exception>> callback) {
-    using UnityWebRequest request =
-      UnityWebRequest.Get(
-        $"{FoundFootagePlugin.Instance.ServerUrl.Value}/video/signed?local={PluginInfo.PLUGIN_VERSION}");
+  private static IEnumerator DownloadFakeVideoSignedUrl_Unity(
+    GetSignedVideoRequest requestParams,
+    Action<Result<GetSignedVideoResponse, Exception>> callback
+  ) {
+    using UnityWebRequest request = UnityWebRequest.Post(
+      $"{FoundFootagePlugin.Instance.ServerUrl.Value}/v3/video/signed?local={PluginInfo.PLUGIN_VERSION}",
+      JsonUtility.ToJson(requestParams),
+      "application/json"
+    );
+
     yield return request.SendWebRequest();
     if(request.result != UnityWebRequest.Result.Success) {
       // What the fuck should I return?
-      callback(Result<(string, string), Exception>.NewError(new Exception(
+      callback(Result<GetSignedVideoResponse, Exception>.NewError(new Exception(
         $"request.GetError={request.GetError()} request.error={request.error} downloadHandler.GetErrorMsg={request.downloadHandler.GetErrorMsg()} downloadHandler.error={request.downloadHandler.error}"
       )));
     } else {
-      var signedUrl = request.downloadHandler.text;
-      var videoId = request.GetResponseHeader("X-Video-Id");
-
-      callback(Result<(string, string), Exception>.NewOk((signedUrl, videoId)));
+      var responseParams = JsonUtility.FromJson<GetSignedVideoResponse>(request.downloadHandler.text);
+      callback(Result<GetSignedVideoResponse, Exception>.NewOk(responseParams));
     }
   }
 
-  public static async Task<(string, string)> DownloadFakeVideoSignedUrl(MonoBehaviour target) {
+  public static async Task<GetSignedVideoResponse> DownloadFakeVideoSignedUrl(MonoBehaviour target,
+    GetSignedVideoRequest requestParams) {
     try {
-      return await UnityShit.CoroutineToTask<(string, string)>(target, DownloadFakeVideoSignedUrl_Unity);
+      return await UnityShit.CoroutineToTask<GetSignedVideoResponse>(target,
+        callback => DownloadFakeVideoSignedUrl_Unity(requestParams, callback));
     } catch(Exception exception) {
       FoundFootagePlugin.Logger.LogError($"An error occurred while getting signed URL: {exception}");
       throw;
@@ -463,7 +548,13 @@ internal static class VideoCameraPatch {
     var clip = new Clip(new ClipID(new Guid()), true, PhotonNetwork.LocalPlayer.ActorNumber, recording);
     clip.isRecording = false;
     clip.encoded = true;
-    clip.SetContentBufffer(new ContentBuffer());
+    if(FoundFootagePlugin.Instance.FakeContentBuffers.TryGetValue(handle, out var buffer)) {
+      clip.SetContentBufffer(buffer);
+      FoundFootagePlugin.Logger.LogInfo("Set fake content buffer from remote");
+    } else {
+      clip.SetContentBufffer(new ContentBuffer());
+    }
+
     clip.SetValid(true);
     recording.AddNewClip(clip);
 
