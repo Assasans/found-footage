@@ -24,13 +24,17 @@ When your team dies or comes back alive (configurable), the camera footage is up
 
 ### Voting
 
-Since v0.3.0 you can like or dislike other people's videos. Video's score will be used for pruning system to remove bad videos (as of 22.04.2024, there are already 52k videos that occupy 260 GB).  
+Since v0.3.0 you can like or dislike other people's videos. Video's score will be used for pruning system to remove bad videos (as of 13.05.2024, there are already 100k videos that occupy 475 GB).  
 If the video is too short **and not funny**, or if it is not in-game footage, go ahead and click Dislike.  
 Vote wisely, **you will not be able to change your vote** even in a different lobby.
 
+### Gaining views
+
+Since v0.4.0 you can get views for found videos.
+You can change how many views you get using the `FoundVideoScoreMultiplier` config option.
+
 ### Todo
 - Spawn cameras at the location where they were lost.
-- Store `ContentBuffer` so that videos can give you views.
 - Website with statistics?
 - Writing comments on videos?
 
@@ -49,6 +53,7 @@ When submitting a bug report, **please attach your BepInEx log (located at `BepI
   * Try opening the URL in a browser.
 - "Failed to get video path"
   * Should be fixed in v0.3.1, please submit a bug report if not.
+  * Try to disable MoreCameras mod
 - Playback stops randomly and no buttons appear
   * Should be fixed in v0.2.2, please submit a bug report if not.
 - "Failed to extract" with found cameras

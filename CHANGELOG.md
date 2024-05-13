@@ -2,7 +2,15 @@
 
 ## v0.3.1
 
-Note: Spawning cameras at lost position and gaining views is still not implemented due to how the mod spawns fake cameras.
+Note: Spawning cameras at lost position is still not implemented due to how the mod spawns fake cameras.
+
+- client: Change fake camera HUD title (replaces `0% FILM LEFT` message)
+- server: Add v3 get video endpoint
+- client: **Content buffer for remote fake videos** (you can now gain views, [#21](https://github.com/Assasans/found-footage/issues/21))
+- client: Use UnityWebRequest ([#20](https://github.com/Assasans/found-footage/issues/20))
+- client: Allow to completely disable uploading ([#23](https://github.com/Assasans/found-footage/issues/23))
+
+## v0.3.1
 
 - client: Send player count
 - client: Persistent config and send more info
