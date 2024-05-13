@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.3.1
+## v0.4.0
 
 Note: Spawning cameras at lost position is still not implemented due to how the mod spawns fake cameras.
 
