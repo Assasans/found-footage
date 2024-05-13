@@ -28,7 +28,8 @@ interface VideoResponse {
   object: string;
   available: boolean;
   ip: string;
-  timestamp: string;
+  position: string;
+  content_buffer: string;
 }
 
 interface RatelimitResponse {
@@ -54,6 +55,13 @@ function normalizePathname(pathname: string) {
   }
 
   return pathname;
+}
+
+interface GetSignedVideoRequest {
+  day: number | null;
+  playerCount: number | null;
+  reason: string | null;
+  language: string | null;
 }
 
 type LogEntry = {
@@ -545,6 +553,91 @@ export default {
           headers: {
             'X-Video-Id': result.video_id
           }
+        }));
+      }
+
+      if(request.method === 'POST' && pathname === '/v3/video/signed') {
+        let { seq }: SeqResponse = (await env.DB.prepare('SELECT seq FROM sqlite_sequence WHERE name = "videos"').first())!;
+
+        const params = await request.json<GetSignedVideoRequest>();
+        if(![null, 'death', 'extract'].includes(params.reason)) params.reason = null;
+
+        const id = Math.floor(Math.random() * seq) + 1;
+        const reason = Math.random() < 0.75 ? 'death' : 'extract';
+
+        let result: VideoResponse | null = null;
+        
+        if(params.day) {
+          result = await env.DB.prepare('SELECT * FROM videos WHERE id >= ? AND available = 1 AND reason = ? AND day = ? AND content_buffer IS NOT NULL LIMIT 1')
+            .bind(id, reason, params.day)
+            .first();
+        } else {
+          result = await env.DB.prepare('SELECT * FROM videos WHERE id >= ? AND available = 1 AND reason = ? AND content_buffer IS NOT NULL LIMIT 1')
+            .bind(id, reason)
+            .first();
+        }
+
+        // Fallback to any video
+        if(!result) {
+          result = await env.DB.prepare('SELECT * FROM videos WHERE id >= ? AND available = 1 LIMIT 1')
+            .bind(id)
+            .first();
+        }
+
+        if(!result) {
+          // Nothing we can do
+          return respond(ray, new Response(`No videos, please report this as a bug. id >= ${id}, seq = ${seq}, reason = ${reason}`));
+        }
+
+        const object = await env.STORAGE.get(result.object);
+        if(object === null) {
+          log('ERROR', {
+            action: 'object not found',
+            ray,
+            object: result.object,
+            video: result
+          });
+
+          // Dangling database entry
+          const response = await env.DB.prepare('UPDATE videos SET available = 0 WHERE id = ?')
+            .bind(id)
+            .run();
+          log('INFO', {
+            action: 'hide dangling video',
+            ray,
+            video: result,
+            response: response
+          });
+
+          return respond(ray, Response.redirect('/video/signed?dangling=1', 302));
+        }
+
+        const r2 = new AwsClient({
+          accessKeyId: env.R2_SIGNING.ACCESS_KEY_ID,
+          secretAccessKey: env.R2_SIGNING.SECRET_ACCESS_KEY
+        });
+
+        const url = new URL(`https://${env.R2_SIGNING.BUCKET}.${env.R2_SIGNING.CLOUDFLARE_ACCOUNT}.r2.cloudflarestorage.com`);
+
+        url.pathname = result.object;
+        // Specify a custom expiry for the presigned URL, in seconds
+        url.searchParams.set('X-Amz-Expires', '3600');
+
+        const signed = await r2.sign(
+          new Request(url, {
+            method: 'GET',
+          }),
+          {
+            aws: { signQuery: true },
+          }
+        );
+
+        // Caller can now use this URL to upload to that object.
+        return respond(ray, Response.json({
+          url: signed.url,
+          videoId: result.video_id,
+          position: result.position,
+          contentBuffer: result.content_buffer.length > 0 ? result.content_buffer : null
         }));
       }
 
