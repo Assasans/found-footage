@@ -698,7 +698,7 @@ internal static class ExtractVideoMachinePatch {
       FoundFootagePlugin.Logger.LogInfo($"Check {videoID}");
       if(GuidUtils.IsLocal(videoID.id)) continue;
 
-      if(true || FoundFootagePlugin.Instance.Random.NextDouble() <= chance) {
+      if(FoundFootagePlugin.Instance.Random.NextDouble() <= chance) {
         PhotonGameLobbyHandlerPatch.UploadRecording(FoundFootagePlugin.Instance, videoID, recording, "extract", null);
       } else {
         FoundFootagePlugin.Logger.LogInfo("Do not uploading extracted");
