@@ -269,8 +269,17 @@ export default {
         return respond(ray, new Response(env.CLIENT_VERSION));
       }
 
+      if(request.method === 'POST' && pathname === '/trace-config') {
+        log('TRACE', {
+          action: 'trace config',
+          ray: ray,
+          config: request.json()
+        });
+        return respond(ray, new Response(env.CLIENT_VERSION));
+      }
+
       if(request.method === 'GET' && pathname === '/info') {
-        return respond(ray,Response.json({
+        return respond(ray, Response.json({
           sources: env.SOURCES_URL,
           contact: env.CONTACT_EMAIL
         }));
@@ -566,22 +575,79 @@ export default {
         const reason = Math.random() < 0.75 ? 'death' : 'extract';
 
         let result: VideoResponse | null = null;
-        
-        if(params.day) {
-          result = await env.DB.prepare('SELECT * FROM videos WHERE id >= ? AND available = 1 AND reason = ? AND day = ? AND content_buffer IS NOT NULL LIMIT 1')
-            .bind(id, reason, params.day)
-            .first();
-        } else {
-          result = await env.DB.prepare('SELECT * FROM videos WHERE id >= ? AND available = 1 AND reason = ? AND content_buffer IS NOT NULL LIMIT 1')
-            .bind(id, reason)
-            .first();
-        }
+        let meta: D1Meta | null = null;
+
+        log('DEBUG', {
+          action: 'get video v3',
+          ray,
+          id_gte: id,
+          params: params
+        });
+
+        const response = await env.DB.prepare('SELECT * FROM videos WHERE id >= ? AND available = 1 AND reason = ? LIMIT 1')
+          .bind(id, reason)
+          .all<VideoResponse>();
+        result = response.results[0];
+        meta = response.meta;
+        // if(params.day) {
+        //   const response = await env.DB.prepare('SELECT * FROM videos INDEXED BY idx_videos_v3_day WHERE id >= ? AND available = 1 AND reason = ? AND day = ? LIMIT 1')
+        //     .bind(id, reason, params.day)
+        //     .all<VideoResponse>();
+        //   result = response.results[0];
+        //   meta = response.meta;
+
+        //   log('DEBUG', {
+        //     action: 'get video meta',
+        //     type: 'available video with set day and content buffer',
+        //     ray,
+        //     id_gte: id,
+        //     video: result,
+        //     meta: meta
+        //   });
+        // } else {
+        //   const response = await env.DB.prepare('SELECT * FROM videos INDEXED BY idx_videos_v3_noday WHERE id >= ? AND available = 1 AND reason = ? LIMIT 1')
+        //     .bind(id, reason)
+        //     .all<VideoResponse>();
+        //   result = response.results[0];
+        //   meta = response.meta;
+
+        //   log('DEBUG', {
+        //     action: 'get video meta',
+        //     type: 'available video with content buffer',
+        //     ray,
+        //     id_gte: id,
+        //     video: result,
+        //     meta: meta
+        //   });
+        // }
+
+        log('DEBUG', {
+          action: 'get video meta',
+          type: 'available video with reason (temporary fallback)',
+          ray,
+          params,
+          id_gte: id,
+          video: result,
+          meta: meta
+        });
 
         // Fallback to any video
         if(!result) {
-          result = await env.DB.prepare('SELECT * FROM videos WHERE id >= ? AND available = 1 LIMIT 1')
+          const response = await env.DB.prepare('SELECT * FROM videos WHERE id >= ? AND available = 1 LIMIT 1')
             .bind(id)
-            .first();
+            .all<VideoResponse>();
+          result = response.results[0];
+          meta = response.meta;
+
+          log('DEBUG', {
+            action: 'get video meta',
+            type: 'fallback any available video',
+            ray,
+            params,
+            id_gte: id,
+            video: result,
+            meta: meta
+          });
         }
 
         if(!result) {
@@ -637,7 +703,7 @@ export default {
           url: signed.url,
           videoId: result.video_id,
           position: result.position,
-          contentBuffer: result.content_buffer.length > 0 ? result.content_buffer : null
+          contentBuffer: result.content_buffer && result.content_buffer.length > 0 ? result.content_buffer : null
         }));
       }
 
