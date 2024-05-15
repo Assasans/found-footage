@@ -59,6 +59,7 @@ public class FoundFootagePlugin : BaseUnityPlugin {
   internal ConfigEntry<string>? UserId { get; private set; }
   internal ConfigEntry<string>? SecretUserId { get; private set; }
   internal ConfigEntry<bool>? WarningShown { get; private set; }
+  internal ConfigEntry<bool>? ConfigTraceEnabled { get; private set; }
   internal ConfigEntry<int>? ConfigVersion { get; private set; }
 
   internal ConfigEntry<bool>? VotingEnabled { get; private set; }
@@ -128,6 +129,7 @@ public class FoundFootagePlugin : BaseUnityPlugin {
     }
 
     WarningShown = PersistentConfig.Bind("Internal", "WarningShown", false, "");
+    ConfigTraceEnabled = PersistentConfig.Bind("Internal", "ConfigTraceEnabled", true, "Controls whether the mod's config is sent to the server when the game starts.\nThis is used to improve defaults and see how experimental features are used.");
     ConfigVersion = Config.Bind("Internal", "ConfigVersion", 1, "");
 
     VotingEnabled = Config.Bind("Voting", "VotingEnabled", true, "Enable voting after watching another team's video.");
@@ -222,6 +224,31 @@ public class FoundFootagePlugin : BaseUnityPlugin {
         throw;
       }
     });
+
+    if(ConfigTraceEnabled.Value) {
+      Task.Run(async () => {
+        try {
+          ConfigTracer tracer = new ConfigTracer();
+          var trace = new ConfigTrace {
+            secretUserId = SecretUserId.Value,
+            values = string.Join("\n", new Dictionary<string, object> {
+              ["SpawnChance"] = SpawnChance.Value,
+              ["DeathUploadChance"] = DeathUploadChance.Value,
+              ["PassUploadChance"] = PassUploadChance.Value,
+              ["DeathVideoChance"] = DeathVideoChance.Value,
+              ["VotingEnabled"] = VotingEnabled.Value,
+              ["SendPositionEnabled"] = SendPositionEnabled.Value,
+              ["SendContentBufferEnabled"] = SendContentBufferEnabled.Value,
+              ["FoundVideoScoreMultiplier"] = FoundVideoScoreMultiplier.Value,
+              ["FoundVideoSearchParams"] = FoundVideoSearchParams.Value
+            }.Select(entry => $"{entry.Key}={entry.Value}"))
+          };
+          await tracer.TraceConfig(this, trace);
+        } catch(Exception exception) {
+          Logger.LogError(exception);
+        }
+      });
+    }
 
     Dispatcher = gameObject.AddComponent<MainThreadDispatcher>();
   }
@@ -676,6 +703,47 @@ public class VersionChecker {
     } catch(Exception exception) {
       FoundFootagePlugin.Logger.LogError($"An error occurred while fetching version: {exception.Message}");
       return IncompatibleVersion;
+    }
+  }
+
+  public bool IsCompatibleWith(string compatible, string actual) {
+    string[] components = compatible.Split('(');
+    if(components[0].Trim() == actual) return true;
+    if(components[1].Contains($"{actual}-compatible")) return true;
+    return false;
+  }
+}
+
+public class ConfigTrace {
+  [SerializeField] public string secretUserId;
+  // Unity :) cannot serialize complex objects
+  [SerializeField] public string values;
+}
+
+public class ConfigTracer {
+  private IEnumerator TraceConfig_Unity(ConfigTrace trace, Action<Result<int, Exception>> callback) {
+    FoundFootagePlugin.Logger.LogInfo($"Trace: {JsonUtility.ToJson(trace)}");
+    using UnityWebRequest request = UnityWebRequest.Post(
+      $"{FoundFootagePlugin.Instance.ServerUrl.Value}/trace-config?local={PluginInfo.PLUGIN_VERSION}",
+      JsonUtility.ToJson(trace),
+      "application/json"
+    );
+    yield return request.SendWebRequest();
+    if(request.result != UnityWebRequest.Result.Success) {
+      // What the fuck should I return?
+      callback(Result<int, Exception>.NewError(new Exception(
+        $"request.GetError={request.GetError()} request.error={request.error} downloadHandler.GetErrorMsg={request.downloadHandler.GetErrorMsg()} downloadHandler.error={request.downloadHandler.error}"
+      )));
+    } else {
+      callback(Result<int, Exception>.NewOk(0));
+    }
+  }
+
+  public async Task TraceConfig(MonoBehaviour target, ConfigTrace trace) {
+    try {
+      await UnityShit.CoroutineToTask<int>(target, callback => TraceConfig_Unity(trace, callback));
+    } catch(Exception exception) {
+      FoundFootagePlugin.Logger.LogError($"An error occurred while tracing config: {exception.Message}");
     }
   }
 

@@ -217,6 +217,25 @@ export default {
         ip: ip.length > 0 ? ip : null
       });
 
+      if(pathname === '/ADMIN-INTERNAL/view') {
+        const result = await env.DB.prepare("SELECT * FROM videos WHERE video_id = ? LIMIT 1")
+          .bind(searchParams.get('video'))
+          .first();
+
+        const object = await env.STORAGE.get(result.object);
+        if(object === null) {
+          return new Response('Object Not Found', { status: 404 });
+        }
+
+        const headers = new Headers();
+        object.writeHttpMetadata(headers);
+        headers.set('etag', object.httpEtag);
+
+        return new Response(object.body, {
+          headers
+        });
+      }
+
       {
         const ratelimit = await incrementRateLimit(env, request, env.RATELIMITS.ACCESS, ip, 'access');
         if(ratelimit.count > Number(env.RATELIMITS.ACCESS.BAN_THRESHOLD)) {
@@ -273,7 +292,7 @@ export default {
         log('TRACE', {
           action: 'trace config',
           ray: ray,
-          config: request.json()
+          config: await request.json()
         });
         return respond(ray, new Response(env.CLIENT_VERSION));
       }
