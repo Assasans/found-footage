@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.4.2
+
+- client: Add config tracing
+- client: Add found video filters setting
+- **client: Migrate persistent config to ".privatecfg"** ([#18](https://github.com/Assasans/found-footage/issues/18))
+- client: Serialize all fields
+
 ## v0.4.1
 
 - client: Fix always uploading videos

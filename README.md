@@ -24,7 +24,7 @@ When your team dies or comes back alive (configurable), the camera footage is up
 
 ### Voting
 
-Since v0.3.0 you can like or dislike other people's videos. Video's score will be used for pruning system to remove bad videos (as of 13.05.2024, there are already 100k videos that occupy 475 GB).  
+Since v0.3.0 you can like or dislike other people's videos. Video's score will be used for pruning system to remove bad videos (as of 13.05.2024, there are already 105k videos that occupy 500 GB).  
 If the video is too short **and not funny**, or if it is not in-game footage, go ahead and click Dislike.  
 Vote wisely, **you will not be able to change your vote** even in a different lobby.
 
