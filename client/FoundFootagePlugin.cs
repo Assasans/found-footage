@@ -79,9 +79,18 @@ public class FoundFootagePlugin : BaseUnityPlugin {
 
     BepInPlugin metadata = MetadataHelper.GetMetadata(this);
     Assert.IsNotNull(metadata); // Unreachable, checked in base class constructor
-    var persistentConfigPath = Path.Combine(Paths.BepInExRootPath, "persistent-config");
+    var persistentConfigDirectory = Path.Combine(Paths.BepInExRootPath, "persistent-config");
+
+    // Migrate old config, r2modman doesn't care about privacy
+    var oldPersistentConfigPath = Utility.CombinePaths(persistentConfigDirectory, $"{metadata.GUID}.cfg");
+    var persistentConfigPath = Utility.CombinePaths(persistentConfigDirectory, $"{metadata.GUID}.privatecfg");
+    if(File.Exists(oldPersistentConfigPath)) {
+      File.Move(oldPersistentConfigPath, persistentConfigPath);
+      Logger.LogInfo("Migrated persistent config to .privatecfg");
+    }
+
     PersistentConfig = new ConfigFile(
-      Utility.CombinePaths(persistentConfigPath, $"{metadata.GUID}.cfg"),
+      persistentConfigPath,
       false,
       metadata
     );
