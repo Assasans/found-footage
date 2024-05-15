@@ -261,17 +261,17 @@ public class FoundFootagePlugin : BaseUnityPlugin {
 }
 
 public class GetSignedVideoRequest {
-  public int? day;
-  public int? playerCount;
-  public string? reason;
-  public string? language;
+  [SerializeField] public int? day;
+  [SerializeField] public int? playerCount;
+  [SerializeField] public string? reason;
+  [SerializeField] public string? language;
 }
 
 public class GetSignedVideoResponse {
-  public string url;
-  public string videoId;
-  public string? position;
-  public string? contentBuffer;
+  [SerializeField] public string url;
+  [SerializeField] public string videoId;
+  [SerializeField] public string? position;
+  [SerializeField] public string? contentBuffer;
 }
 
 public static class HttpUtils {
@@ -336,37 +336,37 @@ public static class HttpUtils {
   }
 }
 
-// [HarmonyPatch(typeof(SurfaceNetworkHandler))]
-// internal static class SurfaceNetworkHandlerPatch {
-//   [HarmonyPostfix]
-//   [HarmonyPatch("InitSurface")]
-//   internal static void SpawnOnStartRun() {
-//     TimeOfDayHandler.SetTimeOfDay(TimeOfDay.Evening);
-//     SpawnExtraCamera();
-//   }
-//
-//   private static void SpawnExtraCamera() {
-//     FoundFootagePlugin.Logger.LogInfo("Spawning extra camera!");
-//
-//     ItemInstanceData instance = new ItemInstanceData(Guid.NewGuid());
-//     VideoInfoEntry entry = new VideoInfoEntry();
-//     entry.videoID = new VideoHandle(GuidUtils.MakeLocal(Guid.NewGuid()));
-//     entry.maxTime = 1;
-//     entry.timeLeft = 0;
-//     entry.SetDirty();
-//     instance.AddDataEntry(entry);
-//     FoundFootagePlugin.Instance.FakeVideos.Add(entry.videoID);
-//     FoundFootagePlugin.Logger.LogInfo($"added entry {entry.videoID.id}");
-//     Pickup pickup = PickupHandler.CreatePickup(1, instance, new Vector3(-14.842f, 2.418f, 8.776f),
-//       Quaternion.Euler(0f, -67.18f, 0f));
-//     FoundFootagePlugin.Logger.LogInfo("Spawned extra camera!");
-//
-//     if(CameraHandler.TryGetCamera(instance.m_guid, out VideoCamera camera)) {
-//     } else {
-//       FoundFootagePlugin.Logger.LogError("No VideoCamera found");
-//     }
-//   }
-// }
+[HarmonyPatch(typeof(SurfaceNetworkHandler))]
+internal static class SurfaceNetworkHandlerPatch {
+  [HarmonyPostfix]
+  [HarmonyPatch("InitSurface")]
+  internal static void SpawnOnStartRun() {
+    TimeOfDayHandler.SetTimeOfDay(TimeOfDay.Evening);
+    SpawnExtraCamera();
+  }
+
+  private static void SpawnExtraCamera() {
+    FoundFootagePlugin.Logger.LogInfo("Spawning extra camera!");
+
+    ItemInstanceData instance = new ItemInstanceData(Guid.NewGuid());
+    VideoInfoEntry entry = new VideoInfoEntry();
+    entry.videoID = new VideoHandle(GuidUtils.MakeLocal(Guid.NewGuid()));
+    entry.maxTime = 1;
+    entry.timeLeft = 0;
+    entry.SetDirty();
+    instance.AddDataEntry(entry);
+    FoundFootagePlugin.Instance.FakeVideos.Add(entry.videoID);
+    FoundFootagePlugin.Logger.LogInfo($"added entry {entry.videoID.id}");
+    Pickup pickup = PickupHandler.CreatePickup(1, instance, new Vector3(-14.842f, 2.418f, 8.776f),
+      Quaternion.Euler(0f, -67.18f, 0f));
+    FoundFootagePlugin.Logger.LogInfo("Spawned extra camera!");
+
+    if(CameraHandler.TryGetCamera(instance.m_guid, out VideoCamera camera)) {
+    } else {
+      FoundFootagePlugin.Logger.LogError("No VideoCamera found");
+    }
+  }
+}
 
 public static class GuidUtils {
   public static Guid MakeLocal(Guid guid) {
