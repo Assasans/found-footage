@@ -29,6 +29,12 @@ using Random = System.Random;
 
 namespace FoundFootage;
 
+public enum FoundVideoSearchParam {
+  LANGUAGE,
+  DAY,
+  PLAYERS_COUNT
+}
+
 [ContentWarningPlugin(PluginInfo.PLUGIN_GUID, PluginInfo.PLUGIN_VERSION, false)]
 [BepInPlugin(PluginInfo.PLUGIN_GUID, PluginInfo.PLUGIN_NAME, PluginInfo.PLUGIN_VERSION)]
 [BepInDependency(MyceliumPluginInfo.PLUGIN_GUID, MyceliumPluginInfo.PLUGIN_VERSION)]
@@ -59,6 +65,14 @@ public class FoundFootagePlugin : BaseUnityPlugin {
   internal ConfigEntry<bool>? SendPositionEnabled { get; private set; }
   internal ConfigEntry<bool>? SendContentBufferEnabled { get; private set; }
   internal ConfigEntry<float>? FoundVideoScoreMultiplier { get; private set; }
+  internal ConfigEntry<string>? FoundVideoSearchParams { get; private set; }
+
+  internal IEnumerable<FoundVideoSearchParam> FoundVideoSearchParamsParsed => FoundVideoSearchParams.Value
+    .TrimStart('[')
+    .TrimEnd(']')
+    .Split(",")
+    .Select(name => name.Trim())
+    .Select(Enum.Parse<FoundVideoSearchParam>);
 
   internal ConfigEntry<float>? SpawnChance { get; private set; }
   internal ConfigEntry<float>? DeathUploadChance { get; private set; }
@@ -123,6 +137,15 @@ public class FoundFootagePlugin : BaseUnityPlugin {
       "Send recording content buffer (scoring data) to allow your videos to give views when viewed by other teams.");
     FoundVideoScoreMultiplier = Config.Bind("Voting", "FoundVideoScoreMultiplier", 0.5f,
       "Controls how much of the original video score you receive. (1 - original score, 0 to disable views for fake videos).");
+    FoundVideoSearchParams = Config.Bind(
+      "Voting",
+      "FoundVideoSearchParams",
+      $"[{string.Join(", ", new List<string> {
+        nameof(FoundVideoSearchParam.LANGUAGE),
+        nameof(FoundVideoSearchParam.DAY),
+      })}]",
+      "Controls which criteria are used to retrieve found videos.\nServer is not required to respect this setting and may return arbitrary videos.\nAvailable values: [LANGUAGE, DAY, PLAYERS_COUNT]\nSet to [] to get completely random videos."
+    );
 
     SpawnChance = Config.Bind("Chances", "SpawnChance", 0.3f,
       "Chance that another team's camera will be spawned (0 to disable).");
@@ -270,8 +293,8 @@ public class FoundFootagePlugin : BaseUnityPlugin {
 }
 
 public class GetSignedVideoRequest {
-  [SerializeField] public int? day;
-  [SerializeField] public int? playerCount;
+  [SerializeField] public int day;
+  [SerializeField] public int playerCount;
   [SerializeField] public string? reason;
   [SerializeField] public string? language;
 }
@@ -468,11 +491,17 @@ internal static class VideoCameraPatch {
       FoundFootagePlugin.Instance.ProcessedFakeVideos.Add(entry.videoID);
 
       FoundFootagePlugin.Logger.LogInfo("CreateFakeVideo start");
+      var parameters = FoundFootagePlugin.Instance.FoundVideoSearchParamsParsed.ToList();
+      FoundFootagePlugin.Logger.LogInfo($"FoundVideoSearchParamsParsed: {string.Join(", ", parameters)}");
       var requestParams = new GetSignedVideoRequest {
-        day = SurfaceNetworkHandler.RoomStats.CurrentDay,
-        playerCount = Object.FindObjectsOfType<Player>().Count(pl => !pl.ai),
+        day = parameters.Contains(FoundVideoSearchParam.DAY) ? SurfaceNetworkHandler.RoomStats.CurrentDay : 0,
+        playerCount = parameters.Contains(FoundVideoSearchParam.PLAYERS_COUNT)
+          ? Object.FindObjectsOfType<Player>().Count(pl => !pl.ai)
+          : 0,
         reason = new Random().NextDouble() < FoundFootagePlugin.Instance.DeathVideoChance.Value ? "death" : "extract",
-        language = CultureInfo.InstalledUICulture.TwoLetterISOLanguageName
+        language = parameters.Contains(FoundVideoSearchParam.LANGUAGE)
+          ? CultureInfo.InstalledUICulture.TwoLetterISOLanguageName
+          : null
       };
       new Thread(() => {
         GetSignedVideoResponse response = DownloadFakeVideoSignedUrl(FoundFootagePlugin.Instance, requestParams)
