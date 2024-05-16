@@ -1,6 +1,12 @@
 # Changelog
 
+## v0.4.3
+
+- client: Disable debug code, again ([#1278](https://github.com/Assasans/found-footage/issues/27))
+
 ## v0.4.2
+
+**Do not use this version**
 
 - client: Add config tracing
 - client: Add found video filters setting
@@ -12,6 +18,8 @@
 - client: Fix always uploading videos
 
 ## v0.4.0
+
+**Do not use this version**
 
 Note: Spawning cameras at lost position is still not implemented due to how the mod spawns fake cameras.
 
