@@ -2,7 +2,7 @@
 
 ## v0.4.3
 
-- client: Disable debug code, again ([#1278](https://github.com/Assasans/found-footage/issues/27))
+- client: Disable debug code, again ([#27](https://github.com/Assasans/found-footage/issues/27))
 
 ## v0.4.2
 
