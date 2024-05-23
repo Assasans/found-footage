@@ -189,6 +189,7 @@ internal static class VideoCameraPatch {
     var clip = new Clip(new ClipID(new Guid()), true, PhotonNetwork.LocalPlayer.ActorNumber, recording);
     clip.isRecording = false;
     clip.encoded = true;
+    clip.local = true;
     if(FoundFootagePlugin.Instance.FakeContentBuffers.TryGetValue(handle, out var buffer)) {
       clip.SetContentBufffer(buffer);
       FoundFootagePlugin.Logger.LogInfo("Set fake content buffer from remote");
@@ -201,9 +202,16 @@ internal static class VideoCameraPatch {
 
     var directory = clip.GetClipDirectory();
     Directory.CreateDirectory(directory);
-    var path = Path.Combine(directory, "output.webm");
 
+    var path = Path.Combine(directory, "output.webm");
     using(var fileStream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None)) {
+      fileStream.Write(content.AsSpan());
+    }
+
+    // Copy to result file in case some mod (MoreCameras) breaks extraction again, this is not needed in vanilla.
+    // MoreCameras issue was fixed by settings [Clip#local] to true.
+    var fullPath = Path.Combine(directory, "../fullRecording.webm");
+    using(var fileStream = new FileStream(fullPath, FileMode.Create, FileAccess.Write, FileShare.None)) {
       fileStream.Write(content.AsSpan());
     }
 
