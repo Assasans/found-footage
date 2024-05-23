@@ -1,4 +1,5 @@
 import { AwsClient } from 'aws4fetch';
+import semver from 'semver';
 
 type RatelimitConfig = { TIMEFRAME: string; THRESHOLD: string; BAN_THRESHOLD: string };
 
@@ -717,12 +718,14 @@ export default {
           }
         );
 
+        const local = searchParams.get('local') ?? '0.0.0';
+
         // Caller can now use this URL to upload to that object.
         return respond(ray, Response.json({
           url: signed.url,
           videoId: result.video_id,
           position: result.position,
-          contentBuffer: result.content_buffer && result.content_buffer.length > 0 ? result.content_buffer : null
+          contentBuffer: semver.satisfies(local, '>=0.4.4') ? result.content_buffer && result.content_buffer.length > 0 ? result.content_buffer : null : null
         }));
       }
 

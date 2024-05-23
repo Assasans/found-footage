@@ -16,6 +16,8 @@
     "wrangler": "^3.0.0"
   },
   "dependencies": {
-    "aws4fetch": "^1.0.18"
+    "@types/semver": "^7.5.8",
+    "aws4fetch": "^1.0.18",
+    "semver": "^7.6.2"
   }
 }
