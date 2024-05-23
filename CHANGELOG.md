@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.4.4
+
+- server: Return ContentBuffer to only fixed versions
+- client: Make ContentBuffer deserialization silent
+- client: Fix MoreCameras not extracting
+- client: Move everything into own files
+- client: Prevent infinite loop while reading ContentBuffer
+
 ## v0.4.3
 
 - client: Disable debug code, again ([#27](https://github.com/Assasans/found-footage/issues/27))

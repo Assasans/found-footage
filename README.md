@@ -8,7 +8,7 @@ This mod must be installed for **all players** in a team.
 
 ## ⚠️ IMPORTANT INFORMATION ⚠️
 
-This mod sends your in-game camera footage to the server __along with audio__, depending on the mod's configuration. **Anyone can watch your videos later.**  
+This mod sends your in-game camera footage to the server __along with audio__, depending on the mod's configuration. **Anyone can watch and download your videos later.**  
 You can request your data or have it removed, see configuration file for more information.
 
 ### A note to modpack makers
@@ -17,21 +17,16 @@ Do not include `BepInEx/persistent-config` directory in your modpack. People wit
 
 ## Gameplay
 
-You can find lost cameras in the Old World. These contain footage of other players who were there before you.  
+You can find lost cameras in the Old World. These contain footage of other players who were there before you.
 You put them into an extraction machine like a normal camera.  
-Note that these recordings **will not give you any views or money**.  
+These recordings will give you half the views of the original video by default, you can change this using the `FoundVideoScoreMultiplier` config option.  
 When your team dies or comes back alive (configurable), the camera footage is uploaded to the server and made available to other players.
 
 ### Voting
 
-Since v0.3.0 you can like or dislike other people's videos. Video's score will be used for pruning system to remove bad videos (as of 13.05.2024, there are already 105k videos that occupy 500 GB).  
+Since v0.3.0 you can like or dislike other people's videos. Video's score will be used for pruning system to remove bad videos (as of 23.05.2024, there are already 117k videos that occupy 555 GB).  
 If the video is too short **and not funny**, or if it is not in-game footage, go ahead and click Dislike.  
 Vote wisely, **you will not be able to change your vote** even in a different lobby.
-
-### Gaining views
-
-Since v0.4.0 you can get views for found videos.
-You can change how many views you get using the `FoundVideoScoreMultiplier` config option.
 
 ### Todo
 - Spawn cameras at the location where they were lost.
@@ -53,7 +48,8 @@ When submitting a bug report, **please attach your BepInEx log (located at `BepI
   * Try opening the URL in a browser.
 - "Failed to get video path"
   * Should be fixed in v0.3.1, please submit a bug report if not.
-  * Try to disable MoreCameras mod
+  * Try to disable MoreCameras mod.
+  * Should be fixed again in v0.4.4.
 - Playback stops randomly and no buttons appear
   * Should be fixed in v0.2.2, please submit a bug report if not.
 - "Failed to extract" with found cameras
