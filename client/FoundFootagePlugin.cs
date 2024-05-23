@@ -257,14 +257,37 @@ public class FoundFootagePlugin : BaseUnityPlugin {
     });
   }
 
+  private ContentEventFrame CreateContentEventForgiving(BinaryDeserializer deserializer) {
+    var frame = new ContentEventFrame();
+    frame.seenAmount = deserializer.ReadFloat();
+    frame.time = deserializer.ReadFloat();
+    frame.contentEvent = ContentEventIDMapper.GetContentEvent(deserializer.ReadUShort());
+    int position = deserializer.position;
+    frame.contentEvent.Deserialize(deserializer);
+    int num1 = deserializer.position - position;
+    int num2 = deserializer.ReadInt();
+    if(num1 != num2) {
+      Logger.LogError(
+        $"Size mismatch on content event: {frame.contentEvent.GetType().Name}. Expected: {num2}, Read: {num1}"
+      );
+    }
+
+    return frame;
+  }
+
+  private ContentBuffer.BufferedContent CreateBufferedContentForgiving(BinaryDeserializer deserializer) {
+    return new ContentBuffer.BufferedContent {
+      score = deserializer.ReadFloat(),
+      frame = CreateContentEventForgiving(deserializer)
+    };
+  }
+
   private ContentBuffer? CreateContentBufferForgiving(BinaryDeserializer deserializer) {
     int num = deserializer.ReadInt();
-    List<ContentBuffer.BufferedContent> bufferedContentList = new List<ContentBuffer.BufferedContent>();
+    var bufferedContentList = new List<ContentBuffer.BufferedContent>();
     for(int index = 0; index < num; ++index) {
       try {
-        ContentBuffer.BufferedContent bufferedContent = new ContentBuffer.BufferedContent();
-        bufferedContent.Deserialize(deserializer);
-        bufferedContentList.Add(bufferedContent);
+        bufferedContentList.Add(CreateBufferedContentForgiving(deserializer));
       } catch(Exception exception) {
         Logger.LogError($"Failed to read BufferedContent {index}: {exception}");
         return null;
