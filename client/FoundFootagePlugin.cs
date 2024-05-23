@@ -253,7 +253,7 @@ public class FoundFootagePlugin : BaseUnityPlugin {
     Dispatcher = gameObject.AddComponent<MainThreadDispatcher>();
   }
 
-  private ContentBuffer CreateContentBufferForgiving(BinaryDeserializer deserializer) {
+  private ContentBuffer? CreateContentBufferForgiving(BinaryDeserializer deserializer) {
     int num = deserializer.ReadInt();
     List<ContentBuffer.BufferedContent> bufferedContentList = new List<ContentBuffer.BufferedContent>();
     for(int index = 0; index < num; ++index) {
@@ -263,6 +263,7 @@ public class FoundFootagePlugin : BaseUnityPlugin {
         bufferedContentList.Add(bufferedContent);
       } catch(Exception exception) {
         Logger.LogError($"Failed to read BufferedContent {index}: {exception}");
+        return null;
       }
     }
 
@@ -282,6 +283,7 @@ public class FoundFootagePlugin : BaseUnityPlugin {
         using BinaryDeserializer deserializer = new BinaryDeserializer(bufferBytes, Allocator.Temp);
         Logger.LogInfo($"CreateContentBufferForgiving(deserializer)");
         var buffer = CreateContentBufferForgiving(deserializer);
+        if(buffer == null) return;
 
         Logger.LogInfo($"Multiply score by {FoundVideoScoreMultiplier.Value}");
         foreach(var bufferedContent in buffer.buffer) {
