@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.4.5
+
+- client: Use custom plugin GameObject
+- server: Replace 302 redirects with server-side retry
+
 ## v0.4.4
 
 - server: Return ContentBuffer to only fixed versions
