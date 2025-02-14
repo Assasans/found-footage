@@ -1,3 +1,5 @@
+#undef DEBUG
+
 using System;
 using HarmonyLib;
 using UnityEngine;
@@ -40,19 +42,19 @@ internal static class SurfaceNetworkHandlerPatch {
   }
 }
 
-[HarmonyPatch(typeof(VerboseDebug))]
-internal static class VerboseDebugPatch {
-  [HarmonyPostfix]
-  [HarmonyPatch("Log")]
-  internal static void Log(string message) {
-    Debug.Log(message);
-  }
-
-  [HarmonyPostfix]
-  [HarmonyPatch("LogError")]
-  internal static void LogError(string s) {
-    Debug.LogError(s);
-  }
-}
+// [HarmonyPatch(typeof(VerboseDebug))]
+// internal static class VerboseDebugPatch {
+//   [HarmonyPostfix]
+//   [HarmonyPatch("Log")]
+//   internal static void Log(string message) {
+//     Debug.Log(message);
+//   }
+//
+//   [HarmonyPostfix]
+//   [HarmonyPatch("LogError")]
+//   internal static void LogError(string s) {
+//     Debug.LogError(s);
+//   }
+// }
 
 #endif

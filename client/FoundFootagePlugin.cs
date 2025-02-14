@@ -30,11 +30,29 @@ public enum FoundVideoSearchParam {
 [ContentWarningPlugin(PluginInfo.PLUGIN_GUID, PluginInfo.PLUGIN_VERSION, false)]
 [BepInPlugin(PluginInfo.PLUGIN_GUID, PluginInfo.PLUGIN_NAME, PluginInfo.PLUGIN_VERSION)]
 [BepInDependency(MyceliumPluginInfo.PLUGIN_GUID, MyceliumPluginInfo.PLUGIN_VERSION)]
-public class FoundFootagePlugin : BaseUnityPlugin {
+public class FoundFootageBootstrapPlugin : BaseUnityPlugin {
+  internal static ManualLogSource Logger { get; private set; }
+
+  internal static BepInPlugin Metadata { get; private set; }
+
+  private void Awake() {
+    Logger = base.Logger;
+    Metadata = MetadataHelper.GetMetadata(this);
+    Assert.IsNotNull(Metadata); // Unreachable, checked in base class constructor
+
+    GameObject instance = new GameObject("FoundFootage Plugin");
+    instance.hideFlags = HideFlags.HideAndDontSave;
+    instance.AddComponent<FoundFootagePlugin>();
+    DontDestroyOnLoad(instance);
+  }
+}
+
+public class FoundFootagePlugin : MonoBehaviour {
   public const uint ModId = 0x20d82112;
 
   public static FoundFootagePlugin Instance { get; private set; }
-  internal static ManualLogSource Logger { get; private set; }
+  internal static ManualLogSource Logger => FoundFootageBootstrapPlugin.Logger;
+  public ConfigFile Config { get; private set; }
 
   internal Random Random { get; private set; }
   internal List<VideoHandle> FakeVideos { get; private set; }
@@ -74,7 +92,6 @@ public class FoundFootagePlugin : BaseUnityPlugin {
 
   private void Awake() {
     Instance = this;
-    Logger = base.Logger;
 
     Random = new Random();
     FakeVideos = new List<VideoHandle>();
@@ -84,22 +101,27 @@ public class FoundFootagePlugin : BaseUnityPlugin {
     ClientToServerId = new Dictionary<VideoHandle, string>();
     FakeContentBuffers = new Dictionary<VideoHandle, ContentBuffer>();
 
-    BepInPlugin metadata = MetadataHelper.GetMetadata(this);
-    Assert.IsNotNull(metadata); // Unreachable, checked in base class constructor
     var persistentConfigDirectory = Path.Combine(Paths.BepInExRootPath, "persistent-config");
 
     // Migrate old config, r2modman doesn't care about privacy
-    var oldPersistentConfigPath = Utility.CombinePaths(persistentConfigDirectory, $"{metadata.GUID}.cfg");
-    var persistentConfigPath = Utility.CombinePaths(persistentConfigDirectory, $"{metadata.GUID}.privatecfg");
+    var oldPersistentConfigPath =
+      Utility.CombinePaths(persistentConfigDirectory, $"{FoundFootageBootstrapPlugin.Metadata.GUID}.cfg");
+    var persistentConfigPath = Utility.CombinePaths(persistentConfigDirectory,
+      $"{FoundFootageBootstrapPlugin.Metadata.GUID}.privatecfg");
     if(File.Exists(oldPersistentConfigPath)) {
       File.Move(oldPersistentConfigPath, persistentConfigPath);
       Logger.LogInfo("Migrated persistent config to .privatecfg");
     }
 
+    Config = new ConfigFile(
+      Utility.CombinePaths(Paths.ConfigPath, FoundFootageBootstrapPlugin.Metadata.GUID + ".cfg"),
+      false,
+      FoundFootageBootstrapPlugin.Metadata
+    );
     PersistentConfig = new ConfigFile(
       persistentConfigPath,
       false,
-      metadata
+      FoundFootageBootstrapPlugin.Metadata
     );
 
     ServerUrl = PersistentConfig.Bind("Internal", "ServerUrl", "https://foundfootage-server.assasans.dev",
@@ -338,13 +360,20 @@ public class FoundFootagePlugin : BaseUnityPlugin {
       Logger.LogInfo("Remote content buffer is disabled in config");
     }
 
-    new Thread(() => {
-      Logger.LogInfo($"Downloading video {guidString} -> {response.url}");
-      byte[] content = VideoCameraPatch.DownloadFakeVideo(this, response.url).GetAwaiter().GetResult();
+    // new Thread(() => {
+    Logger.LogInfo($"Downloading video {guidString} -> {response.url}");
+    // byte[] content = VideoCameraPatch.DownloadFakeVideo(this, response.url).GetAwaiter().GetResult();
+    StartCoroutine(VideoCameraPatch.DownloadFakeVideo_Unity(response.url, result => {
+      if(result.Error != null) {
+        FoundFootagePlugin.Logger.LogError($"An error occurred while getting signed URL: {result.Error}");
+        return;
+      }
 
+      var content = result.Ok!;
       Logger.LogInfo($"VideoCameraPatch.CreateFakeVideo");
       VideoCameraPatch.CreateFakeVideo(handle, content);
-    }).Start();
+    }));
+    // }).Start();
   }
 }
 

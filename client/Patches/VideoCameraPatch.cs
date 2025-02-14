@@ -95,9 +95,15 @@ internal static class VideoCameraPatch {
           ? CultureInfo.InstalledUICulture.TwoLetterISOLanguageName
           : null
       };
-      new Thread(() => {
-        GetSignedVideoResponse response = DownloadFakeVideoSignedUrl(FoundFootagePlugin.Instance, requestParams)
-          .GetAwaiter().GetResult();
+
+      // new Thread(() => {
+      FoundFootagePlugin.Instance.StartCoroutine(DownloadFakeVideoSignedUrl_Unity(requestParams, result => {
+        if(result.Error != null) {
+          FoundFootagePlugin.Logger.LogError($"An error occurred while getting signed URL: {result.Error}");
+          return;
+        }
+
+        var response = result.Ok!;
         FoundFootagePlugin.Logger.LogInfo(
           $"Signed URL got successfully (video ID: {response.videoId}): {response.url}");
         FoundFootagePlugin.Logger.LogInfo("Sending signed URL over Mycelium...");
@@ -108,7 +114,10 @@ internal static class VideoCameraPatch {
           entry.videoID.id.ToString(),
           JsonUtility.ToJson(response)
         );
-      }).Start();
+      }));
+      // GetSignedVideoResponse response = DownloadFakeVideoSignedUrl(FoundFootagePlugin.Instance, requestParams)
+      //   .GetAwaiter().GetResult();
+      // }).Start();
 
       // FoundFootagePlugin.Logger.LogInfo("CreateFakeVideo start");
       // CreateFakeVideo(entry.videoID, content);
@@ -152,7 +161,7 @@ internal static class VideoCameraPatch {
     }
   }
 
-  private static IEnumerator DownloadFakeVideo_Unity(string signedUrl, Action<Result<byte[], Exception>> callback) {
+  public static IEnumerator DownloadFakeVideo_Unity(string signedUrl, Action<Result<byte[], Exception>> callback) {
     using UnityWebRequest request = UnityWebRequest.Get(signedUrl);
     yield return request.SendWebRequest();
     if(request.result != UnityWebRequest.Result.Success) {
